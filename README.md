@@ -94,7 +94,7 @@ The key map follows PictureView's last build (2018.12.11).
 | <kbd>F9</kbd> / <kbd>F11</kbd> | mirror left–right / upside down |
 | <kbd>F12</kbd> | undo rotations and mirrors |
 | <kbd>F5</kbd> | reload |
-| <kbd>I</kbd> | information line on / off |
+| <kbd>I</kbd> | information line over the image on / off (off by default — the window title shows file, size, zoom and decoder) |
 | <kbd>F1</kbd> / <kbd>F2</kbd> | help / settings |
 
 ## Settings

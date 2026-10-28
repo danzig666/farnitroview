@@ -62,7 +62,7 @@ struct Config {
     bool view = true;           // F3
     bool fullscreen = false;    // start in full screen
     bool smooth = true;         // smooth scaling
-    bool showInfo = true;       // the information line
+    bool showInfo = false;      // the information line over the image (the title shows it anyway)
     bool autosize = true;       // fit large images on opening
     bool enlarge = false;       // ... and small ones too
     bool keepPosition = false;  // keep the zoom and position when going to another image

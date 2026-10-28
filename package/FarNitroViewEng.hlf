@@ -93,7 +93,8 @@ $ #FarNitroView: settings#
  #Fullscreen on startup#  Start in full screen instead of over the console window.
  #Smooth scaling#         Bilinear filtering when enlarging (reduction is always
                          area-averaged; integer zoom levels are pixel exact).
- #Show information line#  File name, position, size, zoom and decoder at the top.
+ #Show information line#  File name, position, size, zoom and decoder over the image
+                         (off by default: the window title shows the same; I toggles it).
 
  #Autosize on image open# Large images are fitted to the screen; otherwise 100%.
  #Enlarge small images#   Fitting enlarges small images too.

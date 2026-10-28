@@ -17,7 +17,7 @@ void Config::Load() {
     view = s.Get(0, L"View", view);
     fullscreen = s.Get(0, L"Fullscreen", fullscreen);
     smooth = s.Get(0, L"Smooth", smooth);
-    showInfo = s.Get(0, L"ShowInfo", showInfo);
+    showInfo = s.Get(0, L"ShowInfoLine", showInfo);
     autosize = s.Get(0, L"Autosize", autosize);
     enlarge = s.Get(0, L"Enlarge", enlarge);
     keepPosition = s.Get(0, L"KeepPosition", keepPosition);
@@ -34,7 +34,7 @@ void Config::Save() const {
     s.Set(0, L"View", view);
     s.Set(0, L"Fullscreen", fullscreen);
     s.Set(0, L"Smooth", smooth);
-    s.Set(0, L"ShowInfo", showInfo);
+    s.Set(0, L"ShowInfoLine", showInfo);
     s.Set(0, L"Autosize", autosize);
     s.Set(0, L"Enlarge", enlarge);
     s.Set(0, L"KeepPosition", keepPosition);
