@@ -5,3 +5,4 @@
 *.zip
 *.7z
 /picview/
+/third_party/deps/

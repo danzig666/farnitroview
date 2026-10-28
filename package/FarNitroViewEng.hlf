@@ -5,7 +5,7 @@
 $ #FarNitroView#
  FarNitroView shows images right from Far, in the way of the old PictureView plugin, decoded by
 the parallel decoders of jpeg-nitro: JPEG (baseline and progressive), PNG, PSD/PSB, HEIC,
-DNG, lossy WebP, TIFF and the full-size JPEG inside Canon CR2, Nikon NEF/NRW, Sony ARW and
+DNG, lossy WebP, TIFF, AVIF, SVG and the full-size JPEG inside Canon CR2, Nikon NEF/NRW, Sony ARW and
 Fujifilm RAF files. Everything else (GIF, BMP, ICO, JPEG XR, lossless WebP, AVIF/JPEG XL
 with the Store extensions ...) goes through Windows Imaging Component.
 
@@ -31,6 +31,15 @@ $ #FarNitroView: keys and mouse#
  #Space#/#BS#, #PgDn#/#PgUp#, #N#/#B#, #2#/#1#, mouse wheel
     Next / previous image. With #Shift# the selection of the current file is inverted first;
     with #Ctrl# the zoom and the position are kept.
+
+ #Alt# with the keys above / #Alt-Shift#
+    Next / previous page of a multi-page file / 20 pages at a time.
+
+ #P#
+    Paging goes through the pages too, as if each page were a file.
+
+ #Pause#
+    Pause / resume an animation.
 
  #Home#/#End#, #R#/#T#
     First / last image.
@@ -72,8 +81,11 @@ $ #FarNitroView: keys and mouse#
  #F9#/#F11#
     Mirror left-right / upside down.
 
+ #F6#, #F7#, #F8#
+    Post-processing: more colour (chroma) / automatic brightness / automatic levels.
+
  #F12#
-    Undo the rotations and mirrors (back to the EXIF orientation).
+    Undo the post-processing, rotations and mirrors (back to the EXIF orientation).
 
  #F5#
     Reload the image.
@@ -104,5 +116,11 @@ $ #FarNitroView: settings#
 
  #Background#  Colours (hexadecimal RRGGBB) around the image and behind transparency;
 "Selected" is used for selected files.
+
+ #Post-processing#  Which of auto-levels (F8), auto-luma (F7) and chroma (F6) are on when
+the viewer opens, and how much chroma multiplies the colour saturation.
+
+ #Title template#  What the window title shows: {name} {path} {dir} {index} {count} {width}
+{height} {zoom} {decoder} {ms} {size} {page} {pages} {pageinfo} {pp} {selected}.
 
  #Command line prefix#  The prefix for the command line (default nv).

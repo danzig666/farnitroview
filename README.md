@@ -32,6 +32,11 @@ well as in Windows Terminal.
   selection, and on exit the cursor sits on the last picture you looked at.
 - **Good-looking scaling**: area-averaged reduction (no moiré on fine detail), bilinear or
   pixel-exact enlarging, EXIF orientation, rotation and mirroring.
+- **Animations and pages**: animated GIFs play; multi-page TIFFs (and other multi-frame files)
+  page with Alt-PgDn / Alt-PgUp, or with P as if every page were a file.
+- **Vector images**: SVG is rendered at the scale it is shown, so it stays sharp at any zoom.
+- **Post-processing** as in PictureView: F8 auto-levels, F7 auto-brightness, F6 more colour.
+- **Your own title**: a title template decides what the window title shows.
 - **Quick view**: pictures appear in Far's quick view panel as you move the cursor, and get out of
   the way of dialogs and menus.
 - **Everywhere**: drawn in a window laid over the console — conhost, Windows Terminal (found
@@ -51,9 +56,11 @@ well as in Windows Terminal.
 | DNG raw | **nitrodng** |
 | Canon CR2, Nikon NEF / NRW, Sony ARW, Fujifilm RAF | their full-size embedded JPEG, via nitrojpeg |
 | WebP (lossy) | **nitrowebp** (no loop filter yet) |
-| TIFF — none, PackBits, LZW, Deflate, CCITT G3/G4 | **nitrotiff** |
-| GIF, BMP, ICO, JPEG XR, DDS, CMYK JPEG, interlaced PNG | Windows Imaging Component |
-| lossless / transparent WebP, AVIF, JPEG XL | Windows Imaging Component, with Microsoft's *WebP / AV1 / JPEG XL Image Extensions* installed (Windows 10/11 usually has the WebP one) |
+| TIFF — none, PackBits, LZW, Deflate, CCITT G3/G4 (further pages through WIC) | **nitrotiff** |
+| AVIF — 8–12 bit, 4:2:0–4:4:4, alpha, grids | **nitroavif** with dav1d — no Store extension needed |
+| SVG (without filters) | **lunasvg**, rendered at the shown scale |
+| GIF (animated too), BMP, ICO, JPEG XR, DDS, CMYK JPEG, interlaced PNG | Windows Imaging Component |
+| lossless / transparent WebP, JPEG XL | Windows Imaging Component, with Microsoft's *WebP / JPEG XL Image Extensions* (Windows 10/11 usually has the WebP one) |
 
 Every jpeg-nitro path is checked in CI against Pillow/libjpeg, pixel for pixel, including EXIF
 rotation (`test/`).
@@ -79,6 +86,9 @@ The key map follows PictureView's last build (2018.12.11).
 |---|---|
 | <kbd>Esc</kbd> <kbd>F10</kbd> <kbd>Enter</kbd> <kbd>Alt-F4</kbd>, right click | leave (<kbd>F3</kbd> too when it opened instead of Far's viewer) |
 | <kbd>Space</kbd>/<kbd>BS</kbd>, <kbd>PgDn</kbd>/<kbd>PgUp</kbd>, <kbd>N</kbd>/<kbd>B</kbd>, <kbd>2</kbd>/<kbd>1</kbd>, wheel | next / previous image — with <kbd>Shift</kbd> inverts the selection first, with <kbd>Ctrl</kbd> keeps zoom and position |
+| the same with <kbd>Alt</kbd> / <kbd>Alt-Shift</kbd> | next / previous page of a multi-page file / 20 pages at a time |
+| <kbd>P</kbd> | paging goes through the pages too, as if each were a file |
+| <kbd>Pause</kbd> | pause / resume an animation |
 | <kbd>Home</kbd>/<kbd>End</kbd>, <kbd>R</kbd>/<kbd>T</kbd> | first / last image |
 | <kbd>~</kbd> | back to the previous image (and forth again) |
 | <kbd>F</kbd>, <kbd>Num 5</kbd>, <kbd>Alt-Enter</kbd>, middle click | full screen on / off |
@@ -92,7 +102,8 @@ The key map follows PictureView's last build (2018.12.11).
 | <kbd>Ctrl-Ins</kbd> | copy the title (file, size, zoom, decoder) to the clipboard |
 | <kbd>F3</kbd>/<kbd>F4</kbd>, <kbd>[</kbd>/<kbd>]</kbd> | rotate 90° left / right (<kbd>Shift</kbd> reverses) |
 | <kbd>F9</kbd> / <kbd>F11</kbd> | mirror left–right / upside down |
-| <kbd>F12</kbd> | undo rotations and mirrors |
+| <kbd>F6</kbd> / <kbd>F7</kbd> / <kbd>F8</kbd> | post-processing: more colour (chroma) / auto-brightness (autoluma) / auto-levels |
+| <kbd>F12</kbd> | undo post-processing, rotations and mirrors |
 | <kbd>F5</kbd> | reload |
 | <kbd>I</kbd> | information line over the image on / off (off by default — the window title shows file, size, zoom and decoder) |
 | <kbd>F1</kbd> / <kbd>F2</kbd> | help / settings |
@@ -106,15 +117,17 @@ The key map follows PictureView's last build (2018.12.11).
 - **autosize on open** (fit large images), **enlarge small images**
 - **keep position on jumps**, **loop jumping**
 - **background colours** (hex `RRGGBB`) for normal and for selected files
+- **post-processing** on at the start (auto-levels, auto-luma, chroma) and the **chroma multiplier** (default 1.5)
+- the **title template** — `{name}` `{path}` `{dir}` `{index}` `{count}` `{width}` `{height}` `{zoom}`
+  `{decoder}` `{ms}` `{size}` `{page}` `{pages}` `{pageinfo}` `{pp}` `{selected}`; the default is
+  `FarNitroView: [{index}/{count}] {name}  {width} × {height}  {zoom}  {decoder} {ms} ms{pageinfo}{pp}{selected}`
 - the **command line prefix** (default `nv`)
 
 ## Differences from PictureView
 
-Not there (yet): paging through multi-page images and animations (Alt-PgDn, P), post-processing
-(F6–F8), PVD decoder plugins, the title template. SVG, CorelDRAW and jpeg-nitro's own AVIF decoder
-are not built in (they need lunasvg / libcdr / dav1d); AVIF still opens through WIC when Windows has
-the AV1 extension. Quick view is placed exactly in conhost and Windows Terminal; in other terminals
-the position is estimated from the window size.
+Not there: PVD decoder plugins and CorelDRAW drawings. Animated WebP / AVIF sequences show their
+first frame. Quick view is placed exactly in conhost and Windows Terminal; in other terminals the
+position is estimated from the window size.
 
 ## Building from source
 
@@ -127,6 +140,7 @@ cd farnitroview
 # llvm-mingw, unpacked into ext/ (or set LLVM_MINGW=..., or have it on PATH)
 curl -LO https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-x86_64.zip
 mkdir -p ext && unzip -q llvm-mingw-20261020-ucrt-x86_64.zip -d ext
+./deps.sh                        # optional: lunasvg (SVG) and dav1d (AVIF); needs Python
 ./build.sh                       # -> dist/FarNitroView/
 ARCH=x86-64-v2 ./build.sh        # for CPUs without AVX2
 ```
@@ -146,12 +160,14 @@ and publishes the zips.
 | [`src/viewer.cpp`](src/viewer.cpp) | the modal viewer on Far's console input: keys, mouse, panel navigation and selection, the prefetching loader, quick view |
 | [`src/overlay.cpp`](src/overlay.cpp) | the never-activated topmost window over the console, on its own thread; finds the text area in Windows Terminal via UI Automation |
 | [`src/render.cpp`](src/render.cpp) | zoom and orientation: an area-averaged reduction cache, bilinear / pixel-exact enlarging, all multi-threaded |
-| [`src/decode.cpp`](src/decode.cpp) | jpeg-nitro → BGRA, WIC as the fallback, transparency over the background |
+| [`src/decode.cpp`](src/decode.cpp) | jpeg-nitro → BGRA, SVG, WIC as the fallback (pages, GIF animation composited frame by frame), transparency over the background |
+| [`src/postproc.cpp`](src/postproc.cpp) | auto-levels, auto-luma, chroma |
 | [`src/config.cpp`](src/config.cpp) | settings and the dialog |
 
 ## Credits
 
 - [jpeg-nitro](https://github.com/gereoffy/jpeg-nitro) by A'rpi — the decoders (MIT), included as a submodule.
+- [lunasvg](https://github.com/sammycage/lunasvg) and plutovg by Samuel Ugochukwu (MIT), [dav1d](https://code.videolan.org/videolan/dav1d) by VideoLAN (BSD-2-Clause) — built in by `deps.sh`.
 - [Far Manager](https://github.com/FarGroup/FarManager) plugin SDK headers (`third_party/farsdk`, BSD-3 with plugin exception).
 - PictureView by Pavel Skakov — the plugin this one is modelled on.
 

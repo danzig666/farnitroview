@@ -4,6 +4,7 @@
 #include "DlgBuilder.hpp"
 #include "PluginSettings.hpp"
 
+#include <cmath>
 #include <cwchar>
 
 Config Cfg;
@@ -25,6 +26,11 @@ void Config::Load() {
     bgNormal = (uint32_t)s.Get(0, L"BackgroundNormal", (unsigned __int64)bgNormal) & 0xFFFFFF;
     bgSelected = (uint32_t)s.Get(0, L"BackgroundSelected", (unsigned __int64)bgSelected) & 0xFFFFFF;
     prefix = s.Get(0, L"Prefix", prefix.c_str());
+    ppAutolevels = s.Get(0, L"Autolevels", ppAutolevels);
+    ppAutoluma = s.Get(0, L"Autoluma", ppAutoluma);
+    ppChroma = s.Get(0, L"Chroma", ppChroma);
+    chroma = s.Get(0, L"ChromaPercent", (int)(chroma * 100)) / 100.0;
+    titleTemplate = s.Get(0, L"TitleTemplate", titleTemplate.c_str());
 }
 
 void Config::Save() const {
@@ -42,6 +48,11 @@ void Config::Save() const {
     s.Set(0, L"BackgroundNormal", (unsigned __int64)bgNormal);
     s.Set(0, L"BackgroundSelected", (unsigned __int64)bgSelected);
     s.Set(0, L"Prefix", prefix.c_str());
+    s.Set(0, L"Autolevels", ppAutolevels);
+    s.Set(0, L"Autoluma", ppAutoluma);
+    s.Set(0, L"Chroma", ppChroma);
+    s.Set(0, L"ChromaPercent", (int)std::lround(chroma * 100));
+    s.Set(0, L"TitleTemplate", titleTemplate.c_str());
 }
 
 static bool ParseColor(const wchar_t *s, uint32_t *c) {
@@ -54,32 +65,45 @@ static bool ParseColor(const wchar_t *s, uint32_t *c) {
 }
 
 bool Config::Dialog() {
-    bool b[11] = {enterArchive, quickView, view, fullscreen, smooth, showInfo, autosize, enlarge, keepPosition, loop};
-    wchar_t bgN[16], bgS[16], pfx[32];
+    bool b[13] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize,
+                  enlarge,      keepPosition, loop, ppAutolevels, ppAutoluma, ppChroma};
+    wchar_t bgN[16], bgS[16], pfx[32], chr[16];
     swprintf(bgN, 16, L"%06X", bgNormal);
     swprintf(bgS, 16, L"%06X", bgSelected);
+    swprintf(chr, 16, L"%.2f", chroma);
     wcsncpy(pfx, prefix.c_str(), 31);
     pfx[31] = 0;
+    std::wstring tpl = titleTemplate;
 
     PluginDialogBuilder d(PsInfo, MainGuid, ConfigDialogGuid, MConfigTitle, L"Config");
+    d.StartColumns();
     d.AddText(MProcess);
     d.AddCheckbox(MEnterArchive, &b[0]);
     d.AddCheckbox(MQuickView, &b[1]);
     d.AddCheckbox(MView, &b[2]);
-    d.AddSeparator(MDrawing);
+    d.AddText(MDrawing);
     d.AddCheckbox(MFullscreen, &b[3]);
     d.AddCheckbox(MSmooth, &b[4]);
     d.AddCheckbox(MShowInfo, &b[5]);
-    d.AddSeparator(MAutosize);
+    d.AddText(MAutosize);
     d.AddCheckbox(MAutosizeOpen, &b[6]);
     d.AddCheckbox(MEnlarge, &b[7]);
-    d.AddSeparator(MJumps);
+    d.ColumnBreak();
+    d.AddText(MJumps);
     d.AddCheckbox(MKeepPosition, &b[8]);
     d.AddCheckbox(MLoop, &b[9]);
-    d.AddSeparator(MBackground);
+    d.AddText(MPostProcessing);
+    d.AddCheckbox(MAutolevels, &b[10]);
+    d.AddCheckbox(MAutoluma, &b[11]);
+    d.AddCheckbox(MChroma, &b[12]);
+    d.AddTextBefore(d.AddEditField(chr, 16, 6), MChromaMul);
+    d.AddText(MBackground);
     d.AddTextBefore(d.AddEditField(bgN, 16, 8), MBgNormal);
     d.AddTextBefore(d.AddEditField(bgS, 16, 8), MBgSelected);
+    d.EndColumns();
     d.AddSeparator();
+    d.AddText(MTitleTemplate);
+    d.AddEditField(tpl, 72);
     d.AddTextBefore(d.AddEditField(pfx, 32, 12), MPrefix);
     d.AddOKCancel(MOk, MCancel);
     if (!d.ShowDialog()) return false;
@@ -94,9 +118,15 @@ bool Config::Dialog() {
     enlarge = b[7];
     keepPosition = b[8];
     loop = b[9];
+    ppAutolevels = b[10];
+    ppAutoluma = b[11];
+    ppChroma = b[12];
+    double c = _wtof(chr);
+    if (c > 0 && c <= 10) chroma = c;
     ParseColor(bgN, &bgNormal);
     ParseColor(bgS, &bgSelected);
     if (*pfx) prefix = pfx;
+    if (!tpl.empty()) titleTemplate = tpl;
     Save();
     return true;
 }

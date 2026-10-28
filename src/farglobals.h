@@ -52,6 +52,14 @@ enum LangId {
     MCannotDecode,
     MSelected,
     MNoImages,
+    MPostProcessing,
+    MAutolevels,
+    MAutoluma,
+    MChroma,
+    MChromaMul,
+    MTitleTemplate,
+    MPage,
+    MFrames,
 };
 
 const wchar_t *GetMsg(int id);
@@ -70,6 +78,14 @@ struct Config {
     uint32_t bgNormal = 0x000000;
     uint32_t bgSelected = 0x202040;
     std::wstring prefix = L"nv";
+    bool ppAutolevels = false;  // post-processing on at the start (F8, F7, F6 toggle it)
+    bool ppAutoluma = false;
+    bool ppChroma = false;
+    double chroma = 1.5;        // F6's saturation multiplier
+    // {name} {path} {dir} {index} {count} {width} {height} {zoom} {decoder} {ms} {size} {page}
+    // {pages} {pageinfo} {pp} {selected}
+    std::wstring titleTemplate =
+        L"FarNitroView: [{index}/{count}] {name}  {width} × {height}  {zoom}  {decoder} {ms} ms{pageinfo}{pp}{selected}";
 
     void Load();
     void Save() const;

@@ -14,7 +14,10 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Loader: decodes on a background thread, the image shown first, then its neighbours
+// Loader: decodes on a background thread, the image shown first, then its neighbours. Keys are
+// "path|page" (LoadKey).
+
+static std::wstring LoadKey(const std::wstring &path, int page) { return path + L"|" + std::to_wstring(page); }
 
 class Loader {
 public:
@@ -69,14 +72,15 @@ private:
             if (stop_) break;
             busy_ = queue_.front();
             queue_.erase(queue_.begin());
-            std::wstring path = busy_;
+            std::wstring key = busy_;
             uint32_t bg = bg_;
             l.unlock();
+            size_t bar = key.rfind(L'|');
             Entry e;
-            e.img = DecodeImage(path, bg, &e.err);
+            e.img = DecodeImage(key.substr(0, bar), bg, &e.err, _wtoi(key.c_str() + bar + 1));
             l.lock();
             busy_.clear();
-            if (bg == bg_) done_[path] = e;
+            if (bg == bg_) done_[key] = e;
             SetEvent(notify_);
         }
         l.unlock();
@@ -342,8 +346,15 @@ private:
     Loader loader_;
     HWND host_;
     bool fullscreen_;
-    ImagePtr img_;
+    ImagePtr img_, raw_;        // shown (post-processed), as decoded
     std::wstring err_;
+    int page_ = 0;              // of a multi-page file
+    bool pagesAsImages_ = false;// P: paging goes through the pages too
+    int frame_ = 0;             // of an animation
+    ULONGLONG nextFrame_ = 0;
+    bool paused_ = false;
+    int pp_ = 0;                // post-processing (PP_*)
+    std::wstring lastTitle_;
     bool loaded_ = false, keepNext_ = false, quit_ = false;
     Orient orient_;
     double scale_ = 1, cx_ = 0, cy_ = 0;
@@ -358,6 +369,10 @@ private:
     double dragCx_ = 0, dragCy_ = 0;
 
     void Go(int index, bool keep);
+    void GoPage(int page, bool keep);
+    void Animate();
+    DWORD AnimationWait();
+    void SetPostProcess(int flags);
     void Step(int delta, bool keep);
     void CheckLoaded();
     void Refresh();
@@ -394,6 +409,7 @@ Viewer::Viewer(const std::wstring &path, bool intercepted)
     host_ = FindConsoleHostWindow();
     fullscreen_ = Cfg.fullscreen;
     showInfo_ = Cfg.showInfo;
+    pp_ = (Cfg.ppChroma ? PP_CHROMA : 0) | (Cfg.ppAutoluma ? PP_AUTOLUMA : 0) | (Cfg.ppAutolevels ? PP_AUTOLEVELS : 0);
     wchar_t t[1024] = {};
     GetConsoleTitleW(t, 1024);
     title0_ = t;
@@ -422,23 +438,69 @@ Viewer::~Viewer() {
     CloseHandle(notify_);
 }
 
+// the title (and the information line) from the title template: {name} {path} {dir} {index}
+// {count} {width} {height} {zoom} {decoder} {ms} {size} {page} {pages} {pageinfo} {pp} {selected}
 std::wstring Viewer::Title() {
     const Item &it = items_[cur_];
-    wchar_t b[512];
+    auto num = [](double v, const wchar_t *fmt) {
+        wchar_t b[64];
+        swprintf(b, 64, fmt, v);
+        return std::wstring(b);
+    };
+    auto value = [&](const std::wstring &k) -> std::wstring {
+        if (k == L"name") return it.name;
+        if (k == L"path") return it.path;
+        if (k == L"dir") return it.path.substr(0, it.path.find_last_of(L"\\/") + 1);
+        if (k == L"index") return std::to_wstring(cur_ + 1);
+        if (k == L"count") return std::to_wstring(items_.size());
+        if (k == L"selected") return it.sel ? L"  [" + std::wstring(GetMsg(MSelected)) + L"]" : L"";
+        if (!img_) return L"";
+        if (k == L"width") return std::to_wstring(img_->w);
+        if (k == L"height") return std::to_wstring(img_->h);
+        if (k == L"zoom") return num(scale_ * 100, scale_ < 0.1 ? L"%.1f%%" : L"%.0f%%");
+        if (k == L"decoder") return img_->decoder;
+        if (k == L"ms") return num(img_->ms, L"%.0f");
+        if (k == L"size")
+            return img_->fileSize >= 1 << 20 ? num(img_->fileSize / 1048576.0, L"%.1f MB")
+                                             : num(img_->fileSize / 1024.0, L"%.0f KB");
+        if (k == L"page") return std::to_wstring(page_ + 1);
+        if (k == L"pages") return std::to_wstring(img_->pages);
+        if (k == L"pageinfo") {
+            std::wstring r;
+            if (img_->pages > 1)
+                r = L"  " + std::wstring(GetMsg(MPage)) + L" " + std::to_wstring(page_ + 1) + L"/" +
+                    std::to_wstring(img_->pages);
+            if (img_->FrameCount() > 1)
+                r += L"  " + std::to_wstring(img_->FrameCount()) + L" " + GetMsg(MFrames) + (paused_ ? L" (II)" : L"");
+            if (pagesAsImages_) r += L"  [P]";
+            return r;
+        }
+        if (k == L"pp") {
+            std::wstring r;
+            if (pp_ & PP_AUTOLEVELS) r += L" levels";
+            if (pp_ & PP_AUTOLUMA) r += L" luma";
+            if (pp_ & PP_CHROMA) r += L" chroma";
+            return r.empty() ? r : L"  [" + r.substr(1) + L"]";
+        }
+        return L"{" + k + L"}";
+    };
     std::wstring t;
-    swprintf(b, 512, L"[%d/%d]  ", cur_ + 1, (int)items_.size());
-    t = b + it.name;
-    if (img_) {
-        swprintf(b, 512, L"   %d × %d   %.0f%%   %ls %.0f ms", img_->w, img_->h, scale_ * 100,
-                 img_->decoder.c_str(), img_->ms);
-        t += b;
+    const std::wstring &tpl = Cfg.titleTemplate;
+    for (size_t i = 0; i < tpl.size(); i++) {
+        size_t e;
+        if (tpl[i] == L'{' && (e = tpl.find(L'}', i)) != std::wstring::npos) {
+            t += value(tpl.substr(i + 1, e - i - 1));
+            i = e;
+        } else
+            t += tpl[i];
     }
-    if (it.sel) t += L"   [" + std::wstring(GetMsg(MSelected)) + L"]";
     return t;
 }
 
 void Viewer::Refresh() {
-    SetConsoleTitleW((L"FarNitroView: " + Title()).c_str());
+    std::wstring title = Title();
+    if (title != lastTitle_) SetConsoleTitleW(title.c_str());
+    lastTitle_ = title;
     OverlayState s;
     s.image = img_;
     s.view.orient = orient_;
@@ -446,8 +508,9 @@ void Viewer::Refresh() {
     s.view.cx = cx_;
     s.view.cy = cy_;
     s.view.smooth = Cfg.smooth;
+    s.view.frame = frame_;
     s.bg = items_[cur_].sel ? Cfg.bgSelected : Cfg.bgNormal;
-    if (showInfo_) s.info = Title();
+    if (showInfo_) s.info = title;
     if (!loaded_ && !img_) s.message = GetMsg(MLoading);
     else if (loaded_ && !img_) s.message = items_[cur_].name + L"\n" + GetMsg(MCannotDecode) + L"\n" + err_;
     s.visible = true;
@@ -457,16 +520,18 @@ void Viewer::Refresh() {
 void Viewer::Prefetch() {
     std::vector<std::wstring> want;
     const int n = (int)items_.size();
-    auto add = [&](int i) {
+    auto add = [&](int i, int page) {
         if (Cfg.loop) i = (i % n + n) % n;
-        if (i >= 0 && i < n && std::find(want.begin(), want.end(), items_[i].path) == want.end())
-            want.push_back(items_[i].path);
+        if (i < 0 || i >= n) return;
+        std::wstring k = LoadKey(items_[i].path, page);
+        if (std::find(want.begin(), want.end(), k) == want.end()) want.push_back(k);
     };
-    add(cur_);
-    add(cur_ + 1);
-    add(cur_ - 1);
-    add(cur_ + 2);
-    if (prev_ >= 0) add(prev_);
+    add(cur_, page_);
+    if (raw_ && page_ + 1 < raw_->pages) add(cur_, page_ + 1);
+    add(cur_ + 1, 0);
+    add(cur_ - 1, 0);
+    add(cur_ + 2, 0);
+    if (prev_ >= 0) add(prev_, 0);
     loader_.Want(want);
 }
 
@@ -474,6 +539,7 @@ void Viewer::Go(int index, bool keep) {
     if (index < 0 || index >= (int)items_.size()) return;
     if (index != cur_) prev_ = cur_;
     cur_ = index;
+    page_ = 0;
     loaded_ = false;
     keepNext_ = keep;
     Prefetch();
@@ -481,7 +547,24 @@ void Viewer::Go(int index, bool keep) {
     if (!loaded_) Refresh();   // (the previous image stays until this one is there; the title says which)
 }
 
+void Viewer::GoPage(int page, bool keep) {
+    if (!raw_ || raw_->pages <= 1) return;
+    page = std::clamp(page, 0, raw_->pages - 1);
+    if (page == page_) return;
+    page_ = page;
+    loaded_ = false;
+    keepNext_ = keep;
+    Prefetch();
+    CheckLoaded();
+    if (!loaded_) Refresh();
+}
+
 void Viewer::Step(int delta, bool keep) {
+    // P: the pages of a multi-page file first, as if they were files of their own
+    if (pagesAsImages_ && loaded_ && raw_ && raw_->pages > 1 && page_ + delta >= 0 && page_ + delta < raw_->pages) {
+        GoPage(page_ + delta, keep);
+        return;
+    }
     const int n = (int)items_.size();
     int i = cur_ + delta;
     if (Cfg.loop) i = (i % n + n) % n;
@@ -489,16 +572,42 @@ void Viewer::Step(int delta, bool keep) {
     if (i != cur_) Go(i, keep);
 }
 
+void Viewer::SetPostProcess(int flags) {
+    pp_ = flags;
+    img_ = pp_ ? PostProcess(raw_, pp_, Cfg.chroma) : raw_;
+    Refresh();
+}
+
+// the time until the next animation frame (INFINITE: none)
+DWORD Viewer::AnimationWait() {
+    if (!img_ || img_->FrameCount() < 2 || paused_) return INFINITE;
+    ULONGLONG now = GetTickCount64();
+    return now >= nextFrame_ ? 0 : (DWORD)(nextFrame_ - now);
+}
+
+void Viewer::Animate() {
+    if (AnimationWait() != 0) return;
+    const int n = img_->FrameCount();
+    frame_ = (frame_ + 1) % n;
+    ULONGLONG now = GetTickCount64();
+    nextFrame_ += (ULONGLONG)img_->delays[frame_];
+    if (nextFrame_ < now) nextFrame_ = now + img_->delays[frame_];   // (fell behind: no catching up)
+    Refresh();
+}
+
 void Viewer::CheckLoaded() {
     if (loaded_) return;
     ImagePtr img;
     std::wstring err;
-    if (!loader_.Get(items_[cur_].path, &img, &err)) return;
+    if (!loader_.Get(LoadKey(items_[cur_].path, page_), &img, &err)) return;
     loaded_ = true;
     const bool keep = (keepNext_ || Cfg.keepPosition) && img_ && img;
     keepNext_ = false;
-    img_ = img;
+    raw_ = img;
+    img_ = pp_ && img ? PostProcess(img, pp_, Cfg.chroma) : img;
     err_ = err;
+    frame_ = 0;
+    if (img_ && img_->FrameCount() > 1) nextFrame_ = GetTickCount64() + img_->delays[0];
     if (!img_) {
         Refresh();
         return;
@@ -620,6 +729,7 @@ void Viewer::Dialog(int which) {
         uint32_t bg = Cfg.bgNormal;
         if (Cfg.Dialog()) {
             showInfo_ = Cfg.showInfo;
+            if (pp_) img_ = PostProcess(raw_, pp_, Cfg.chroma);   // (the chroma multiplier may have changed)
             if (bg != Cfg.bgNormal) {
                 loader_.SetBackground(Cfg.bgNormal);
                 loaded_ = false;
@@ -660,6 +770,11 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
     // moving to another image: Shift inverts the selection of the current one first (panel only),
     // Ctrl keeps the zoom and the position
     auto jump = [&](int delta) {
+        if (alt && !ctrl) {   // pages of a multi-page file; Alt-Shift: 20 at a time
+            GoPage(page_ + delta * (shift ? 20 : 1), false);
+            return;
+        }
+        if (alt) return;
         if (shift && panel_) it.sel = !it.sel;
         Step(delta, ctrl);
         if (shift && panel_ && loaded_) Refresh();
@@ -708,14 +823,15 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
     }
     case VK_F9: orient_.FlipH(); Refresh(); return;
     case VK_F11: orient_.FlipV(); Refresh(); return;
-    case VK_F12:
+    case VK_F12:   // no post-processing, rotations, mirrors
+        if (pp_) SetPostProcess(0);
         if (img_) orient_ = Orient::FromExif(img_->orientation);
         if (fit_ != Fit::None) ApplyFit(fit_);
         else Clamp();
         Refresh();
         return;
     case VK_F5:
-        loader_.Forget(it.path);
+        loader_.Forget(LoadKey(it.path, page_));
         loaded_ = false;
         keepNext_ = true;
         Prefetch();
@@ -724,13 +840,23 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
     case VK_F2: Dialog(2); return;
 
     case VK_SPACE: case VK_NEXT: case 'N': case '2':
-        if (alt) return;   // (pages of multi-page images: not supported)
         jump(1);
         return;
     case VK_BACK: case VK_PRIOR: case 'B': case '1':
-        if (alt) return;
         jump(-1);
         return;
+    case 'P':
+        pagesAsImages_ = !pagesAsImages_;
+        Refresh();
+        return;
+    case VK_PAUSE:
+        paused_ = !paused_;
+        if (!paused_) nextFrame_ = GetTickCount64();
+        Refresh();
+        return;
+    case VK_F6: SetPostProcess(pp_ ^ PP_CHROMA); return;
+    case VK_F7: SetPostProcess(pp_ ^ PP_AUTOLUMA); return;
+    case VK_F8: SetPostProcess(pp_ ^ PP_AUTOLEVELS); return;
     case VK_HOME: case 'R': Go(0, ctrl); return;
     case VK_END: case 'T': Go((int)items_.size() - 1, ctrl); return;
 
@@ -838,7 +964,8 @@ void Viewer::Run() {
     INPUT_RECORD recs[64];
     while (!quit_) {
         CheckLoaded();
-        WaitForMultipleObjects(3, h, FALSE, 250);
+        Animate();
+        WaitForMultipleObjects(3, h, FALSE, std::min<DWORD>(250, AnimationWait()));
         DWORD n = 0;
         if (GetNumberOfConsoleInputEvents(in_, &n) && n) {
             if (!ReadConsoleInputW(in_, recs, 64, &n)) n = 0;

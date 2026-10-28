@@ -2,7 +2,9 @@
 #include "image.h"
 #include "par.h"
 
+#include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstring>
 #include <shlwapi.h>
 #include <wincodec.h>
@@ -10,6 +12,29 @@
 extern "C" {
 #include "nitro_convert.h"
 #include "nitro_load.h"
+#ifdef NV_SVG
+#include "nitrosvg.h"
+#endif
+}
+
+bool HaveSvg() {
+#ifdef NV_SVG
+    return true;
+#else
+    return false;
+#endif
+}
+bool HaveAvif() {
+#ifdef NV_DAV1D
+    return true;
+#else
+    return false;
+#endif
+}
+
+Image::~Image() {
+    if (px) _aligned_free(px);
+    for (uint8_t *f : frames) _aligned_free(f);
 }
 
 bool Image::Alloc(int width, int height) {
@@ -20,20 +45,35 @@ bool Image::Alloc(int width, int height) {
     return px != nullptr;
 }
 
+uint8_t *Image::NewFrame() {
+    uint8_t *f = (uint8_t *)_aligned_malloc(pitch * (size_t)h + 64, 64);
+    if (f) frames.push_back(f);
+    return f;
+}
+
 // Extensions beyond nv_image_exts that WIC reads on a stock Windows (or with the usual codecs)
 static const wchar_t *const kWicExts[] = {L"ico", L"cur", L"jxr", L"wdp", L"hdp", L"dds", L"dib", L"jxl", nullptr};
 
+static bool HasExt(const wchar_t *path, const wchar_t *e) {
+    const wchar_t *ext = PathFindExtensionW(path);
+    return *ext && !_wcsicmp(ext + 1, e);
+}
+
 bool IsImageName(const wchar_t *path) {
     if (nv_is_image_name_w(path)) return true;
-    const wchar_t *ext = PathFindExtensionW(path);
-    if (!*ext) return false;
+    if (HaveSvg() && HasExt(path, L"svg")) return true;
     for (const wchar_t *const *e = kWicExts; *e; e++)
-        if (!_wcsicmp(ext + 1, *e)) return true;
+        if (HasExt(path, *e)) return true;
     return false;
 }
 
 bool IsImageSignature(const void *data, size_t len) {
     const uint8_t *p = (const uint8_t *)data;
+    if (HaveSvg() && len >= 5) {   // SVG: "<svg" near the start (after an XML declaration, comments ...)
+        size_t n = len < 1024 ? len : 1024;
+        for (size_t i = 0; i + 4 <= n; i++)
+            if (!memcmp(p + i, "<svg", 4)) return true;
+    }
     if (len >= 3 && p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF) return true;                  // JPEG
     if (len >= 8 && !memcmp(p, "\x89PNG\r\n\x1a\n", 8)) return true;                             // PNG
     if (len >= 6 && (!memcmp(p, "GIF87a", 6) || !memcmp(p, "GIF89a", 6))) return true;          // GIF
@@ -166,59 +206,177 @@ static int DecodeNitro(uint8_t *data, size_t len, int rawOrientation, int rawRea
 }
 
 // ---------------------------------------------------------------------------
-// WIC
+// WIC: any page of multi-page files; animated GIFs composited frame by frame
 
-static bool DecodeWic(const uint8_t *data, size_t len, uint32_t bg, Image *im, int *orientation, std::wstring *error) {
+namespace {
+template <class T> struct Com {   // releases on scope exit
+    T *p = nullptr;
+    ~Com() { if (p) p->Release(); }
+    T **operator&() { return &p; }
+    T *operator->() const { return p; }
+    explicit operator bool() const { return p != nullptr; }
+};
+
+int MetaInt(IWICMetadataQueryReader *r, const wchar_t *name, int def) {
+    if (!r) return def;
+    PROPVARIANT v;
+    PropVariantInit(&v);
+    int out = def;
+    if (SUCCEEDED(r->GetMetadataByName(name, &v))) {
+        if (v.vt == VT_UI1) out = v.bVal;
+        else if (v.vt == VT_UI2) out = v.uiVal;
+        else if (v.vt == VT_UI4) out = (int)v.ulVal;
+        else if (v.vt == VT_BOOL) out = v.boolVal ? 1 : 0;
+    }
+    PropVariantClear(&v);
+    return out;
+}
+
+// a frame as premultiplied BGRA, w x h, rows of 4w bytes
+bool FramePixels(IWICBitmapFrameDecode *frame, UINT w, UINT h, uint8_t *dst, size_t pitch) {
+    Com<IWICBitmapSource> conv;
+    return SUCCEEDED(WICConvertBitmapSource(GUID_WICPixelFormat32bppPBGRA, frame, &conv)) &&
+           SUCCEEDED(conv->CopyPixels(nullptr, (UINT)pitch, (UINT)(pitch * h), dst));
+}
+
+// premultiplied pixels over the background, opaque; returns whether any were transparent
+bool Flatten(const uint8_t *src, uint8_t *dst, size_t pitch, int w, int h, uint32_t bg) {
+    const int bR = bg >> 16 & 255, bG = bg >> 8 & 255, bB = bg & 255;
+    std::atomic<bool> any{false};
+    ParallelFor((size_t)h, [&](size_t y) {
+        const uint8_t *s = src + y * pitch;
+        uint8_t *d = dst + y * pitch;
+        bool a = false;
+        for (int x = 0; x < w; x++, s += 4, d += 4) {
+            int A = s[3];
+            if (A == 255) { memcpy(d, s, 4); continue; }
+            a = true;
+            d[0] = OverPremul(s[0], A, bB); d[1] = OverPremul(s[1], A, bG); d[2] = OverPremul(s[2], A, bR);
+            d[3] = 255;
+        }
+        if (a) any = true;
+    });
+    return any;
+}
+
+// GIF: the frames composited on the logical screen (offsets, transparency, disposal)
+bool DecodeGifAnimation(IWICBitmapDecoder *dec, UINT count, uint32_t bg, Image *im) {
+    Com<IWICMetadataQueryReader> gm;
+    dec->GetMetadataQueryReader(&gm);
+    int W = MetaInt(gm.p, L"/logscrdesc/Width", 0), H = MetaInt(gm.p, L"/logscrdesc/Height", 0);
+    if (W <= 0 || H <= 0) {
+        Com<IWICBitmapFrameDecode> f0;
+        UINT w0, h0;
+        if (FAILED(dec->GetFrame(0, &f0)) || FAILED(f0->GetSize(&w0, &h0))) return false;
+        W = (int)w0;
+        H = (int)h0;
+    }
+    if (W > 16384 || H > 16384 || !im->Alloc(W, H)) return false;
+    const size_t P = (size_t)W * 4, bytes = P * H, cap = (size_t)768 << 20;   // all frames: at most 768 MB
+    std::vector<uint8_t> canvas(bytes, 0), saved, fr;
+    bool anyAlpha = false;
+    for (UINT i = 0; i < count; i++) {
+        if (i && (size_t)(i + 1) * bytes > cap) break;
+        Com<IWICBitmapFrameDecode> frame;
+        Com<IWICMetadataQueryReader> m;
+        UINT fw = 0, fh = 0;
+        if (FAILED(dec->GetFrame(i, &frame)) || FAILED(frame->GetSize(&fw, &fh)) || !fw || !fh) break;
+        frame->GetMetadataQueryReader(&m);
+        const int left = MetaInt(m.p, L"/imgdesc/Left", 0), top = MetaInt(m.p, L"/imgdesc/Top", 0);
+        const int disposal = MetaInt(m.p, L"/grctlext/Disposal", 0);
+        int delay = MetaInt(m.p, L"/grctlext/Delay", 10) * 10;
+        if (delay < 20) delay = 100;   // (as browsers do)
+        if (disposal == 3) saved = canvas;
+        fr.resize((size_t)fw * fh * 4);
+        if (!FramePixels(frame.p, fw, fh, fr.data(), (size_t)fw * 4)) break;
+        // the frame over the canvas (premultiplied "over"), clipped to it
+        for (int y = 0; y < (int)fh; y++) {
+            int cy = top + y;
+            if (cy < 0 || cy >= H) continue;
+            const uint8_t *s = &fr[(size_t)y * fw * 4];
+            uint8_t *d = &canvas[(size_t)cy * P];
+            for (int x = 0; x < (int)fw; x++, s += 4) {
+                int cx = left + x;
+                if (cx < 0 || cx >= W) continue;
+                uint8_t *q = d + (size_t)cx * 4;
+                int a = s[3];
+                if (a == 255) memcpy(q, s, 4);
+                else if (a)
+                    for (int c = 0; c < 4; c++) q[c] = (uint8_t)(s[c] + (q[c] * (255 - a) + 127) / 255);
+            }
+        }
+        uint8_t *out = i == 0 ? im->px : im->NewFrame();
+        if (!out) break;
+        anyAlpha |= Flatten(canvas.data(), out, P, W, H, bg);
+        im->delays.push_back(delay);
+        // what the next frame starts from
+        if (disposal == 2) {
+            for (int y = std::max(0, top); y < std::min(H, top + (int)fh); y++)
+                memset(&canvas[(size_t)y * P + (size_t)std::max(0, left) * 4], 0,
+                       (size_t)(std::min(W, left + (int)fw) - std::max(0, left)) * 4);
+        } else if (disposal == 3 && !saved.empty()) {
+            canvas.swap(saved);
+        }
+    }
+    if (im->delays.empty()) return false;
+    if (im->delays.size() == 1) im->delays.clear();   // a still image after all
+    im->alpha = anyAlpha;
+    return true;
+}
+}   // namespace
+
+// Decodes page `page` (an animated GIF: all its frames). *pages: how many the file has.
+static bool DecodeWic(const uint8_t *data, size_t len, uint32_t bg, Image *im, int *orientation, std::wstring *error,
+                      int page) {
     HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     bool ok = false;
-    IWICImagingFactory *f = nullptr;
-    IWICStream *st = nullptr;
-    IWICBitmapDecoder *dec = nullptr;
-    IWICBitmapFrameDecode *frame = nullptr;
-    IWICBitmapSource *conv = nullptr;
-    IWICMetadataQueryReader *meta = nullptr;
-    UINT w = 0, h = 0;
-    GUID container = {};
-    if (len > 0xFFFFFFFFu ||
-        FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f))) ||
-        FAILED(f->CreateStream(&st)) || FAILED(st->InitializeFromMemory((BYTE *)data, (DWORD)len)) ||
-        FAILED(f->CreateDecoderFromStream(st, nullptr, WICDecodeMetadataCacheOnDemand, &dec)) ||
-        FAILED(dec->GetFrame(0, &frame)) || FAILED(frame->GetSize(&w, &h)) || !w || !h || w > 65535 || h > 65535) {
-        if (error->empty()) *error = L"Unknown or damaged image";
-        goto done;
-    }
-    if (SUCCEEDED(frame->GetMetadataQueryReader(&meta))) {
-        PROPVARIANT v;
-        PropVariantInit(&v);
-        if (SUCCEEDED(meta->GetMetadataByName(L"System.Photo.Orientation", &v)) && v.vt == VT_UI2 && v.uiVal >= 1 &&
-            v.uiVal <= 8)
-            *orientation = v.uiVal;
-        PropVariantClear(&v);
-    }
-    if (FAILED(WICConvertBitmapSource(GUID_WICPixelFormat32bppPBGRA, frame, &conv)) || !im->Alloc((int)w, (int)h) ||
-        FAILED(conv->CopyPixels(nullptr, (UINT)im->pitch, (UINT)(im->pitch * h), im->px))) {
-        *error = L"Cannot decode image";
-        goto done;
-    }
     {
-        const int bR = bg >> 16 & 255, bG = bg >> 8 & 255, bB = bg & 255;
-        std::atomic<bool> any{false};
-        ParallelFor((size_t)h, [&](size_t y) {
-            uint8_t *d = im->px + y * im->pitch;
-            bool a = false;
-            for (UINT x = 0; x < w; x++, d += 4) {
-                int A = d[3];
-                if (A == 255) continue;
-                a = true;
-                d[0] = OverPremul(d[0], A, bB); d[1] = OverPremul(d[1], A, bG); d[2] = OverPremul(d[2], A, bR);
-                d[3] = 255;
+        Com<IWICImagingFactory> f;
+        Com<IWICStream> st;
+        Com<IWICBitmapDecoder> dec;
+        Com<IWICBitmapFrameDecode> frame;
+        Com<IWICMetadataQueryReader> meta;
+        UINT w = 0, h = 0, count = 1;
+        GUID container = {};
+        if (len > 0xFFFFFFFFu ||
+            FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f.p))) ||
+            FAILED(f->CreateStream(&st)) || FAILED(st->InitializeFromMemory((BYTE *)data, (DWORD)len)) ||
+            FAILED(f->CreateDecoderFromStream(st.p, nullptr, WICDecodeMetadataCacheOnDemand, &dec))) {
+            if (error->empty()) *error = L"Unknown or damaged image";
+            goto done;
+        }
+        dec->GetContainerFormat(&container);
+        if (FAILED(dec->GetFrameCount(&count)) || !count) count = 1;
+        const bool gif = IsEqualGUID(container, GUID_ContainerFormatGif);
+        if (gif && count > 1) {   // an animation, not pages
+            if (!DecodeGifAnimation(dec.p, count, bg, im)) {
+                *error = L"Cannot decode image";
+                goto done;
             }
-            if (a) any = true;
-        });
-        im->alpha = any;
-    }
-    im->decoder = L"WIC";
-    if (SUCCEEDED(dec->GetContainerFormat(&container))) {
+        } else {
+            if (page < 0 || page >= (int)count) page = 0;
+            if (FAILED(dec->GetFrame((UINT)page, &frame)) || FAILED(frame->GetSize(&w, &h)) || !w || !h || w > 65535 ||
+                h > 65535) {
+                if (error->empty()) *error = L"Unknown or damaged image";
+                goto done;
+            }
+            if (SUCCEEDED(frame->GetMetadataQueryReader(&meta))) {
+                PROPVARIANT v;
+                PropVariantInit(&v);
+                if (SUCCEEDED(meta->GetMetadataByName(L"System.Photo.Orientation", &v)) && v.vt == VT_UI2 &&
+                    v.uiVal >= 1 && v.uiVal <= 8)
+                    *orientation = v.uiVal;
+                PropVariantClear(&v);
+            }
+            if (!im->Alloc((int)w, (int)h) || !FramePixels(frame.p, w, h, im->px, im->pitch)) {
+                *error = L"Cannot decode image";
+                goto done;
+            }
+            im->alpha = Flatten(im->px, im->px, im->pitch, (int)w, (int)h, bg);
+            im->page = page;
+            im->pages = (int)count;
+        }
+        im->decoder = L"WIC";
         static const struct { const GUID *g; const wchar_t *n; } names[] = {
             {&GUID_ContainerFormatJpeg, L"WIC jpeg"}, {&GUID_ContainerFormatPng, L"WIC png"},
             {&GUID_ContainerFormatGif, L"WIC gif"},   {&GUID_ContainerFormatBmp, L"WIC bmp"},
@@ -226,22 +384,53 @@ static bool DecodeWic(const uint8_t *data, size_t len, uint32_t bg, Image *im, i
             {&GUID_ContainerFormatWmp, L"WIC jxr"},   {&GUID_ContainerFormatDds, L"WIC dds"}};
         for (auto &n : names)
             if (IsEqualGUID(container, *n.g)) im->decoder = n.n;
+        ok = true;
     }
-    ok = true;
 done:
-    if (meta) meta->Release();
-    if (conv) conv->Release();
-    if (frame) frame->Release();
-    if (dec) dec->Release();
-    if (st) st->Release();
-    if (f) f->Release();
     if (SUCCEEDED(hrInit)) CoUninitialize();
     return ok;
 }
 
+// How many pages WIC sees in a file (a TIFF nitrotiff decoded: its first page only)
+static int WicPageCount(const uint8_t *data, size_t len) {
+    HRESULT hrInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    UINT count = 1;
+    {
+        Com<IWICImagingFactory> f;
+        Com<IWICStream> st;
+        Com<IWICBitmapDecoder> dec;
+        if (len <= 0xFFFFFFFFu &&
+            SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f.p))) &&
+            SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromMemory((BYTE *)data, (DWORD)len)) &&
+            SUCCEEDED(f->CreateDecoderFromStream(st.p, nullptr, WICDecodeMetadataCacheOnDemand, &dec)))
+            if (FAILED(dec->GetFrameCount(&count)) || !count) count = 1;
+    }
+    if (SUCCEEDED(hrInit)) CoUninitialize();
+    return (int)count;
+}
+
+// ---------------------------------------------------------------------------
+// SVG
+
+#ifdef NV_SVG
+static bool DecodeSvg(const uint8_t *data, size_t len, Image *im, std::wstring *error) {
+    nitrosvg *s = nitrosvg_load(data, len);
+    if (!s) {
+        *error = L"Not an SVG lunasvg can draw";
+        return false;
+    }
+    im->svg.reset(s, nitrosvg_free);
+    nitrosvg_size(s, &im->svgW, &im->svgH);
+    im->w = std::max(1, (int)std::ceil(im->svgW));
+    im->h = std::max(1, (int)std::ceil(im->svgH));
+    im->decoder = L"lunasvg";
+    return true;
+}
+#endif
+
 // ---------------------------------------------------------------------------
 
-ImagePtr DecodeImage(const std::wstring &path, uint32_t background, std::wstring *error) {
+ImagePtr DecodeImage(const std::wstring &path, uint32_t background, std::wstring *error, int page) {
     LARGE_INTEGER t0, t1, fq;
     QueryPerformanceCounter(&t0);
     std::string u8 = Utf8(path);
@@ -255,11 +444,24 @@ ImagePtr DecodeImage(const std::wstring &path, uint32_t background, std::wstring
     auto im = std::make_shared<Image>();
     int orientation = 1;
     std::wstring err;
-    int rc = DecodeNitro(data, len, rawOrientation, rawRead, background, im.get(), &orientation, &err);
-    if (rc == 1) {
+    int rc = 1;
+#ifdef NV_SVG
+    if (HasExt(path.c_str(), L"svg") || (!IsImageName(path.c_str()) && IsImageSignature(data, len) &&
+                                         len >= 5 && memchr(data, '<', len < 64 ? len : 64))) {
+        rc = DecodeSvg(data, len, im.get(), &err) ? 0 : -1;
+        if (rc && !HasExt(path.c_str(), L"svg")) rc = 1;   // (not SVG after all: the others' turn)
+    }
+#endif
+    if (rc == 1 && page == 0) {
+        size_t n = len;
+        rc = DecodeNitro(data, n, rawOrientation, rawRead, background, im.get(), &orientation, &err);
+        if (rc == 0 && !rawRead && (HasExt(path.c_str(), L"tif") || HasExt(path.c_str(), L"tiff")))
+            im->pages = WicPageCount(data, len);   // (nitrotiff: the first page)
+    }
+    if (rc == 1 || (rc != 0 && page > 0)) {
         // the platform's turn (a camera raw: its embedded JPEG, which nv_decode moved to the start)
         int o = orientation;
-        if (DecodeWic(data, len, background, im.get(), &o, &err)) {
+        if (DecodeWic(data, len, background, im.get(), &o, &err, page)) {
             rc = 0;
             if (orientation == 1) orientation = o;
         }

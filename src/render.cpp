@@ -6,6 +6,9 @@
 // bilinear at non-integer scales below 4, pixel-exact otherwise.
 #include "render.h"
 #include "par.h"
+#ifdef NV_SVG
+#include "nitrosvg.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -79,7 +82,7 @@ bool Renderer::BuildCache(const Image &im, const ViewParams &v) {
     // horizontal: every source row -> nw pixels
     ParallelFor((size_t)(im.h + 15) / 16, [&](size_t b) {
         for (int y = (int)b * 16; y < I->h && y < (int)b * 16 + 16; y++) {
-            const uint8_t *s = I->px + (size_t)y * I->pitch;
+            const uint8_t *s = I->Frame(v.frame) + (size_t)y * I->pitch;
             uint8_t *d = &tmp[(size_t)y * nw * 4];
             for (int j = 0; j < nw; j++, d += 4) {
                 const uint8_t *p = s + (size_t)tx.start[j] * 4;
@@ -158,7 +161,7 @@ void Renderer::DrawDirect(const Image &im, const ViewParams &v, uint8_t *dst, si
         double sx = I->w / 2.0 + m[0] * dx0 + m[1] * dy, sy = I->h / 2.0 + m[2] * dx0 + m[3] * dy;
         const double stx = m[0] * inv, sty = m[2] * inv;
         uint32_t *d = (uint32_t *)(dst + (size_t)Y * pitch) + x0;
-        const uint8_t *px = I->px;
+        const uint8_t *px = I->Frame(v.frame);
         const size_t P = I->pitch;
         const int w = I->w, h = I->h;
         if (!bilinear) {
@@ -186,6 +189,57 @@ void Renderer::DrawDirect(const Image &im, const ViewParams &v, uint8_t *dst, si
     });
 }
 
+// A vector image: the visible part rendered at the scale it is shown (sharp at any zoom), in the
+// source frame, then turned to the orientation.
+void Renderer::DrawSvg(const ImagePtr &im, const ViewParams &v, uint8_t *dst, size_t pitch, int x0, int y0, int x1,
+                       int y1, double left, double top) {
+    const int RW = x1 - x0, RH = y1 - y0;
+    const bool same = svgImage_.lock() == im && svgOrient_ == v.orient && svgScale_ == v.scale && svgLeft_ == left &&
+                      svgTop_ == top && svgRect_.left == x0 && svgRect_.top == y0 && svgRect_.right == x1 &&
+                      svgRect_.bottom == y1;
+    if (!same) {
+        svgPx_.assign((size_t)RW * RH, 0xFFFFFFFFu);
+#ifdef NV_SVG
+        const int *m = v.orient.m;
+        const bool tr = v.orient.Transposed();
+        const int SW = tr ? RH : RW, SH = tr ? RW : RH;
+        int ow, oh;
+        OrientedSize(*im, v.orient, &ow, &oh);
+        // the source rectangle the visible part shows: its corner with the smallest coordinates
+        const double s = v.scale;
+        double sx0 = 1e300, sy0 = 1e300;
+        for (int c = 0; c < 4; c++) {
+            double du = ((c & 1 ? x1 : x0) - left) / s - ow / 2.0, dv = ((c & 2 ? y1 : y0) - top) / s - oh / 2.0;
+            sx0 = std::min(sx0, im->w / 2.0 + m[0] * du + m[1] * dv);
+            sy0 = std::min(sy0, im->h / 2.0 + m[2] * du + m[3] * dv);
+        }
+        std::vector<uint32_t> src((size_t)SW * SH);
+        if (nitrosvg_render(im->svg.get(), (uint8_t *)src.data(), SW, SH, (size_t)SW * 4, s, sx0, sy0) == 0) {
+            uint32_t *out = svgPx_.data();
+            const uint32_t *in = src.data();
+            ParallelFor((size_t)RH, [&](size_t b) {
+                const int db = 2 * (int)b + 1 - RH;
+                for (int a = 0; a < RW; a++) {
+                    int da = 2 * a + 1 - RW;
+                    int px = (m[0] * da + m[1] * db + SW - 1) / 2, py = (m[2] * da + m[3] * db + SH - 1) / 2;
+                    out[b * RW + a] = in[(size_t)py * SW + px] | 0xFF000000u;
+                }
+            });
+        }
+#endif
+        svgImage_ = im;
+        svgOrient_ = v.orient;
+        svgScale_ = v.scale;
+        svgLeft_ = left;
+        svgTop_ = top;
+        SetRect(&svgRect_, x0, y0, x1, y1);
+    }
+    const uint32_t *c = svgPx_.data();
+    ParallelFor((size_t)RH, [&](size_t r) {
+        memcpy(dst + (size_t)(y0 + r) * pitch + (size_t)x0 * 4, c + r * RW, (size_t)RW * 4);
+    });
+}
+
 void Renderer::Draw(const ImagePtr &im, const ViewParams &v, uint32_t bg, uint8_t *dst, size_t pitch, int W, int H,
                     RECT *drawn) {
     const uint32_t bgpx = 0xFF000000u | bg;
@@ -203,12 +257,18 @@ void Renderer::Draw(const ImagePtr &im, const ViewParams &v, uint32_t bg, uint8_
     int x1 = std::min(W, (int)std::ceil(left + ow * v.scale)), y1 = std::min(H, (int)std::ceil(top + oh * v.scale));
     if (x0 >= x1 || y0 >= y1) return;
 
+    if (im->svg) {
+        DrawSvg(im, v, dst, pitch, x0, y0, x1, y1, left, top);
+        if (drawn) SetRect(drawn, x0, y0, x1, y1);
+        return;
+    }
     if (v.scale < 1) {
-        if (cacheImage_.lock() != im || !(cacheOrient_ == v.orient) || cacheScale_ != v.scale || cache_.empty()) {
+        if (cacheImage_.lock() != im || !(cacheOrient_ == v.orient) || cacheScale_ != v.scale || cacheFrame_ != v.frame || cache_.empty()) {
             cache_.clear();
             cacheImage_ = im;
             cacheOrient_ = v.orient;
             cacheScale_ = v.scale;
+            cacheFrame_ = v.frame;
             if (!BuildCache(*im, v)) cache_.clear();
         }
         if (!cache_.empty()) {

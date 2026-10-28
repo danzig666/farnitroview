@@ -28,6 +28,7 @@ struct ViewParams {
     double scale = 1;     // screen pixels per image pixel
     double cx = 0, cy = 0;// the (oriented) image point at the middle of the viewport
     bool smooth = true;
+    int frame = 0;        // of an animation
 };
 
 class Renderer {
@@ -36,7 +37,7 @@ public:
     // rectangle on screen is returned in *drawn (empty if it is outside).
     void Draw(const ImagePtr &im, const ViewParams &v, uint32_t bg, uint8_t *dst, size_t pitch, int W, int H,
               RECT *drawn = nullptr);
-    void Clear() { cache_.clear(); cacheImage_.reset(); }
+    void Clear() { cache_.clear(); cacheImage_.reset(); svgPx_.clear(); svgImage_.reset(); }
 
 private:
     // the whole image, oriented and reduced to the current scale (scale < 1)
@@ -45,8 +46,17 @@ private:
     std::weak_ptr<const Image> cacheImage_;
     Orient cacheOrient_;
     double cacheScale_ = 0;
+    int cacheFrame_ = 0;
+    // a vector image's last rendering
+    std::vector<uint32_t> svgPx_;
+    std::weak_ptr<const Image> svgImage_;
+    Orient svgOrient_;
+    double svgScale_ = 0, svgLeft_ = 0, svgTop_ = 0;
+    RECT svgRect_ = {};
 
     bool BuildCache(const Image &im, const ViewParams &v);
+    void DrawSvg(const ImagePtr &im, const ViewParams &v, uint8_t *dst, size_t pitch, int x0, int y0, int x1, int y1,
+                 double left, double top);
     void DrawDirect(const Image &im, const ViewParams &v, uint8_t *dst, size_t pitch, int W, int H, int x0, int y0,
                     int x1, int y1);
 };

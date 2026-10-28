@@ -90,8 +90,37 @@ int wmain(int argc, wchar_t **argv) {
         v.scale = 3;
         r.Draw(im, v, 0x303030, fit.data(), (size_t)W * 4, W, H);
         WriteBmp((std::wstring(argv[a]) + L".zoom.bmp").c_str(), fit.data(), W, H);
-        wprintf(L"%-40ls %-22ls %5dx%-5d o%d %hs %6.1f ms  draw-fit %5.1f ms  PSNR %5.1f max %d\n", argv[a],
-                im->decoder.c_str(), im->w, im->h, im->orientation, im->alpha ? "A" : "-", im->ms, rms, psnr, maxd);
+        // a vector image: a pixel at 100% above the middle (the test SVG has its yellow disc there)
+        if (im->svg) {
+            const uint8_t *m = &full[((size_t)(oh * 3 / 10) * ow + ow / 2) * 4];
+            bool ok = abs(m[2] - 0xff) < 8 && abs(m[1] - 0xd3) < 8 && abs(m[0] - 0x3d) < 8;
+            psnr = ok ? 99 : 0;
+            maxd = ok ? 0 : 255;
+        }
+        // another page / the last frame, and post-processing, must work too
+        int extra = 0;
+        if (im->pages > 1) {
+            std::wstring e2;
+            ImagePtr p2 = DecodeImage(argv[a], 0, &e2, im->pages - 1);
+            if (!p2 || p2->page != im->pages - 1) {
+                wprintf(L"  page %d: FAILED %ls\n", im->pages, e2.c_str());
+                fails++;
+            } else
+                extra = p2->w;
+        }
+        if (im->FrameCount() > 1) {
+            v.frame = im->FrameCount() - 1;
+            v.scale = 1;
+            r.Draw(im, v, 0, full.data(), (size_t)ow * 4, ow, oh);
+        }
+        ImagePtr pp = PostProcess(im, PP_CHROMA | PP_AUTOLUMA | PP_AUTOLEVELS, 1.5);
+        if (!pp || pp->w != im->w || pp->FrameCount() != im->FrameCount()) {
+            wprintf(L"  post-processing FAILED\n");
+            fails++;
+        }
+        wprintf(L"%-40ls %-22ls %5dx%-5d o%d %hs %6.1f ms  draw-fit %5.1f ms  frames %d pages %d(%d)  PSNR %5.1f max %d\n",
+                argv[a], im->decoder.c_str(), im->w, im->h, im->orientation, im->alpha ? "A" : "-", im->ms, rms,
+                im->FrameCount(), im->pages, extra, psnr, maxd);
     }
     return fails;
 }
