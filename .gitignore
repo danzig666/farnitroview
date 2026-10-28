@@ -1,0 +1,7 @@
+/build/
+/dist/
+/ext/
+/test/images/
+*.zip
+*.7z
+/picview/

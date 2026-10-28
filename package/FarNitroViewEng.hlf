@@ -1,0 +1,107 @@
+﻿.Language=English,English
+.PluginContents=FarNitroView
+
+@Contents
+$ #FarNitroView#
+ FarNitroView shows images right from Far, in the way of the old PictureView plugin, decoded by
+the parallel decoders of jpeg-nitro: JPEG (baseline and progressive), PNG, PSD/PSB, HEIC,
+DNG, lossy WebP, TIFF and the full-size JPEG inside Canon CR2, Nikon NEF/NRW, Sony ARW and
+Fujifilm RAF files. Everything else (GIF, BMP, ICO, JPEG XR, lossless WebP, AVIF/JPEG XL
+with the Store extensions ...) goes through Windows Imaging Component.
+
+ It is started by
+   - #Enter# or #Ctrl-PgDn# on an image (option "Enter archive");
+   - #F3# on an image, also inside archives and from Find file (option "View");
+   - the quick view panel, #Ctrl-Q# (option "Quick view");
+   - the plugins menu (#F11#) in the panels, the viewer and the editor;
+   - the command line prefix #nv:# (e.g. nv:photo.jpg).
+
+ Opened on a file of the active panel, the other images of the panel can be paged through
+in the panel's order and the selection can be changed. Otherwise the images of the file's
+folder are paged through, in name order.
+
+ ~Keys and mouse~@Keys@
+ ~Settings~@Config@
+
+@Keys
+$ #FarNitroView: keys and mouse#
+ #Esc#, #F10#, #Enter#, #Alt-F4#, right click
+    Leave. (#F3# too, when opened instead of Far's viewer.)
+
+ #Space#/#BS#, #PgDn#/#PgUp#, #N#/#B#, #2#/#1#, mouse wheel
+    Next / previous image. With #Shift# the selection of the current file is inverted first;
+    with #Ctrl# the zoom and the position are kept.
+
+ #Home#/#End#, #R#/#T#
+    First / last image.
+
+ #~~#
+    Back to the previously shown image (and again: forth), keeping the position.
+
+ #F#, #Numpad 5#, #Alt-Enter#, middle click
+    Full screen on / off.
+
+ #*#, #9#
+    Zoom 100%.
+
+ #/#, #0#, #Tab#, double click on the image
+    Toggle: fit to the screen / 100%.
+
+ #*#, #9#, #/#, #0#, #Tab# with #Ctrl# / #Shift# / #Alt#
+    Fit to the screen / to the width / to the height.
+
+ Double click on the background
+    Fit to the width or the height, whichever fills the screen.
+
+ #+#/#-#, #E#/#Q#, wheel with the left button (or #Ctrl#) held
+    Zoom in / out in √2 steps, stopping at 100% and at the fitted size; with #Alt# in small
+    steps, smaller still with #Ctrl-Alt#. The wheel zooms around the mouse pointer.
+
+ Arrows, #W#/#A#/#S#/#D#, dragging with the mouse
+    Move a zoomed image; #Alt#: small steps, smaller with #Ctrl-Alt#; #Ctrl#: slow.
+
+ #Ins#/#Del#
+    Select / unselect the current file (panel only).
+
+ #Ctrl-Ins#
+    Copy the title (file, size, zoom, decoder) to the clipboard.
+
+ #F3#/#F4#, #[#/#]#
+    Rotate 90° counter-clockwise / clockwise (#Shift# reverses).
+
+ #F9#/#F11#
+    Mirror left-right / upside down.
+
+ #F12#
+    Undo the rotations and mirrors (back to the EXIF orientation).
+
+ #F5#
+    Reload the image.
+
+ #I#
+    Information line on / off.
+
+ #F1#, #F2#
+    This help, the ~settings~@Config@.
+
+@Config
+$ #FarNitroView: settings#
+ #Enter archive#      Open images on Enter and Ctrl-PgDn.
+ #Quick view#         Show images in the quick view panel.
+ #View#               Open images with FarNitroView instead of Far's viewer (F3).
+
+ #Fullscreen on startup#  Start in full screen instead of over the console window.
+ #Smooth scaling#         Bilinear filtering when enlarging (reduction is always
+                         area-averaged; integer zoom levels are pixel exact).
+ #Show information line#  File name, position, size, zoom and decoder at the top.
+
+ #Autosize on image open# Large images are fitted to the screen; otherwise 100%.
+ #Enlarge small images#   Fitting enlarges small images too.
+
+ #Keep position on jumps# The zoom and the position stay when going to another image.
+ #Loop jumping#           After the last image the first, before the first the last.
+
+ #Background#  Colours (hexadecimal RRGGBB) around the image and behind transparency;
+"Selected" is used for selected files.
+
+ #Command line prefix#  The prefix for the command line (default nv).

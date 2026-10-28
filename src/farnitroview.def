@@ -1,0 +1,13 @@
+LIBRARY FarNitroView.dll
+EXPORTS
+    GetGlobalInfoW
+    SetStartupInfoW
+    GetPluginInfoW
+    ConfigureW
+    AnalyseW
+    CloseAnalyseW
+    OpenW
+    ProcessConsoleInputW
+    ProcessViewerEventW
+    ProcessSynchroEventW
+    ExitFARW

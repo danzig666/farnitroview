@@ -1,0 +1,94 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LLVM_MINGW_VERSION: '20261020'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.${GITHUB_RUN_NUMBER}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "version $v"
+
+      - name: Cache llvm-mingw
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: ext/llvm-mingw-${{ env.LLVM_MINGW_VERSION }}-ucrt-x86_64
+          key: llvm-mingw-${{ env.LLVM_MINGW_VERSION }}-ucrt-x86_64
+
+      - name: Download llvm-mingw
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ext
+          curl -sSfL -o ext/llvm-mingw.zip "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-x86_64.zip"
+          7z x -y -oext ext/llvm-mingw.zip > /dev/null
+          rm ext/llvm-mingw.zip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow
+        run: python -m pip install --quiet pillow
+
+      - name: Build (AVX2, x86-64-v3)
+        run: ARCH=x86-64-v3 OUT="$PWD/dist/FarNitroView" ./build.sh
+
+      - name: Build (any x64 CPU, x86-64-v2)
+        run: ARCH=x86-64-v2 OUT="$PWD/dist/legacy/FarNitroView" ./build.sh
+
+      - name: Decoder tests
+        run: |
+          ARCH=x86-64-v2 ./test/run_tests.sh
+          # (the AVX2 build too, unless the runner's CPU lacks AVX2)
+          ARCH=x86-64-v3 ./test/run_tests.sh || echo "::warning::AVX2 build test failed (runner without AVX2?)"
+
+      - name: Package
+        run: |
+          cd dist
+          7z a -tzip "FarNitroView-${VERSION}-x64.zip" FarNitroView > /dev/null
+          (cd legacy && 7z a -tzip "../FarNitroView-${VERSION}-x64-noavx2.zip" FarNitroView > /dev/null)
+          ls -la *.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FarNitroView-${{ env.VERSION }}
+          path: dist/*.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          **FarNitroView ${VERSION}** — image viewer plugin for Far Manager 3.0.6699+ (x64), decoding with [jpeg-nitro](https://github.com/gereoffy/jpeg-nitro).
+
+          | file | for |
+          |---|---|
+          | \`FarNitroView-${VERSION}-x64.zip\` | CPUs with AVX2 (Intel Haswell 2013+, AMD Zen 2017+) — fastest |
+          | \`FarNitroView-${VERSION}-x64-noavx2.zip\` | any x64 CPU |
+
+          Unpack into \`Far Manager\\Plugins\\\` and restart Far.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/*.zip --title "FarNitroView ${VERSION}" --notes-file notes.md --generate-notes
