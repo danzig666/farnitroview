@@ -52,7 +52,8 @@ well as in Windows Terminal.
 | Canon CR2, Nikon NEF / NRW, Sony ARW, Fujifilm RAF | their full-size embedded JPEG, via nitrojpeg |
 | WebP (lossy) | **nitrowebp** (no loop filter yet) |
 | TIFF — none, PackBits, LZW, Deflate, CCITT G3/G4 | **nitrotiff** |
-| GIF, BMP, ICO, JPEG XR, DDS, lossless WebP, CMYK JPEG, interlaced PNG, AVIF / JPEG XL / HEIF with the Store codecs | Windows Imaging Component |
+| GIF, BMP, ICO, JPEG XR, DDS, CMYK JPEG, interlaced PNG | Windows Imaging Component |
+| lossless / transparent WebP, AVIF, JPEG XL | Windows Imaging Component, with Microsoft's *WebP / AV1 / JPEG XL Image Extensions* installed (Windows 10/11 usually has the WebP one) |
 
 Every jpeg-nitro path is checked in CI against Pillow/libjpeg, pixel for pixel, including EXIF
 rotation (`test/`).
