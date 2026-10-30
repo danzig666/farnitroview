@@ -71,6 +71,7 @@ static bool TerminalControlRect(HWND w, RECT *r) {
 Overlay::Overlay(bool interactive) : interactive_(interactive) {
     event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     ready_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    renderer_.SetNotify([this] { if (hwnd_) PostMessageW(hwnd_, WM_NV_UPDATE, 0, 0); });
     thread_ = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
     if (thread_) WaitForSingleObject(ready_, 5000);
 }
@@ -313,7 +314,8 @@ void Overlay::Paint(HDC dc) {
     GetClientRect(hwnd_, &cr);
     const int W = cr.right, H = cr.bottom;
     if (W <= 0 || H <= 0) return;
-    if (!dib_ || dibW_ != W || dibH_ != H) {
+    const bool sameDib = dib_ && dibW_ == W && dibH_ == H;
+    if (!sameDib) {
         if (dib_) DeleteObject(dib_);
         BITMAPINFO bi = {};
         bi.bmiHeader.biSize = sizeof bi.bmiHeader;
@@ -335,13 +337,15 @@ void Overlay::Paint(HDC dc) {
         int ow, oh;
         OrientedSize(*s.image, s.view.orient, &ow, &oh);
         double sc = std::min((double)W / ow, (double)H / oh);
-        if (!s.enlarge) sc = std::min(sc, 1.0);
+        if (!s.enlarge && !s.image->pdf) sc = std::min(sc, 1.0);
         s.view.scale = sc;
         s.view.cx = ow / 2.0;
         s.view.cy = oh / 2.0;
     }
+    if (sameDib && s.message.empty() && renderer_.Hold(s.image, s.view, W, H)) return;
     GdiFlush();
     renderer_.Draw(s.image, s.view, s.bg, (uint8_t *)bits_, (size_t)W * 4, W, H);
+    if (s.message.empty() && renderer_.Blank()) s.message = s.busyText;
 
     HDC mem = CreateCompatibleDC(dc);
     HGDIOBJ old = SelectObject(mem, dib_);
@@ -392,6 +396,7 @@ LRESULT Overlay::Handle(UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER: {
         Reposition();
         if (++ticks_ % 5 == 0) {
+            if (renderer_.Busy()) InvalidateRect(hwnd_, nullptr, FALSE);   // (a slow PDF page comes in as it is drawn)
             std::function<void()> t;
             {
                 std::lock_guard<std::mutex> l(mu_);

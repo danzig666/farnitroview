@@ -54,8 +54,31 @@ open(f"{out}/vector.svg", "w").write(
     '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250" viewBox="0 0 400 250">'
     '<rect width="400" height="250" fill="#1f6feb"/><circle cx="200" cy="125" r="100" fill="#ffd33d"/>'
     '<path d="M40 210 L360 40" stroke="#d73a49" stroke-width="12"/></svg>')
+# PDF, written by hand: 3 pages; a blue page with a yellow square (as vector.svg's disc, the harness
+# looks for it), the same turned by /Rotate, a smaller one. And a file that only claims to be a PDF.
+def pdf(path, pages):
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", None]
+    kids = []
+    for (w, h, rot, content) in pages:
+        kids.append(f"{len(objs) + 1} 0 R")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w} {h}] /Rotate {rot} /Resources << >> /Contents {len(objs) + 2} 0 R >>".encode())
+        objs.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(content), content))
+    objs[1] = f"<< /Type /Pages /Count {len(pages)} /Kids [{' '.join(kids)}] >>".encode()
+    b = bytearray(b"%PDF-1.7\n")
+    offs = []
+    for i, o in enumerate(objs):
+        offs.append(len(b))
+        b += b"%d 0 obj\n%s\nendobj\n" % (i + 1, o)
+    xref = len(b)
+    b += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    for o in offs: b += b"%010d 00000 n \n" % o
+    b += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    open(path, "wb").write(b)
+page1 = b"0.122 0.435 0.922 rg 0 0 400 250 re f 1 0.827 0.239 rg 100 50 200 150 re f 0.843 0.227 0.286 rg 10 10 40 40 re f"
+pdf(f"{out}/vector.pdf", [(400, 250, 0, page1), (400, 250, 90, page1), (300, 300, 0, b"0 0.5 1 rg 0 0 300 300 re f")])
+open(f"{out}/damaged.pdf", "wb").write(b"%PDF-1.7\nnothing a reader could use\n" * 50)
 for f in sorted(os.listdir(out)):
-    if f.endswith(".rgb"): continue
+    if f.endswith((".rgb", ".pdf")): continue
     try:
         r = Image.open(f"{out}/{f}")
         from PIL import ImageOps

@@ -6,6 +6,7 @@
 // bilinear at non-integer scales below 4, pixel-exact otherwise.
 #include "render.h"
 #include "par.h"
+#include "pdf.h"
 #ifdef NV_SVG
 #include "nitrosvg.h"
 #endif
@@ -13,6 +14,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+
+Renderer::Renderer() = default;
+Renderer::~Renderer() = default;
 
 Orient Orient::FromExif(int o) {
     static const int t[9][4] = {{1, 0, 0, 1},  {1, 0, 0, 1},  {-1, 0, 0, 1}, {-1, 0, 0, -1}, {1, 0, 0, -1},
@@ -240,8 +244,36 @@ void Renderer::DrawSvg(const ImagePtr &im, const ViewParams &v, uint8_t *dst, si
     });
 }
 
+// How long the last frame may stay (Hold) while a page has nothing to show yet
+static const ULONGLONG kPdfHoldMs = 800;
+
+PdfView &Renderer::Pdf() {
+    if (!pdf_) pdf_ = std::make_unique<PdfView>(pdfNotify_);
+    return *pdf_;
+}
+
+bool Renderer::Hold(const ImagePtr &im, const ViewParams &v, int W, int H) {
+    if (!im || !im->pdf || v.scale <= 0) return false;
+    const double left = W / 2.0 - v.cx * v.scale, top = H / 2.0 - v.cy * v.scale;
+    return Pdf().Prepare(*im, v.orient, v.scale, W, H, left, top) == PdfView::Nothing &&
+           GetTickCount64() - Pdf().NothingSince() < kPdfHoldMs;
+}
+
+bool Renderer::Busy() const { return pdf_ && pdf_->Busy(); }
+
+void Renderer::Finish() {
+    if (pdf_) pdf_->Wait();
+}
+
+void Renderer::DrawPdf(const ImagePtr &im, const ViewParams &v, uint8_t *dst, size_t pitch, int W, int H, double left,
+                       double top) {
+    pdfBlank_ = Pdf().Prepare(*im, v.orient, v.scale, W, H, left, top) == PdfView::Nothing;
+    Pdf().Draw(*im, v.orient, v.scale, W, H, left, top, dst, pitch);
+}
+
 void Renderer::Draw(const ImagePtr &im, const ViewParams &v, uint32_t bg, uint8_t *dst, size_t pitch, int W, int H,
                     RECT *drawn) {
+    pdfBlank_ = false;
     const uint32_t bgpx = 0xFF000000u | bg;
     ParallelFor((size_t)H, [&](size_t y) {
         uint32_t *d = (uint32_t *)(dst + y * pitch);
@@ -257,6 +289,11 @@ void Renderer::Draw(const ImagePtr &im, const ViewParams &v, uint32_t bg, uint8_
     int x1 = std::min(W, (int)std::ceil(left + ow * v.scale)), y1 = std::min(H, (int)std::ceil(top + oh * v.scale));
     if (x0 >= x1 || y0 >= y1) return;
 
+    if (im->pdf) {
+        DrawPdf(im, v, dst, pitch, W, H, left, top);
+        if (drawn) SetRect(drawn, x0, y0, x1, y1);
+        return;
+    }
     if (im->svg) {
         DrawSvg(im, v, dst, pitch, x0, y0, x1, y1, left, top);
         if (drawn) SetRect(drawn, x0, y0, x1, y1);

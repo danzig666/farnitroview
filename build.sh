@@ -6,7 +6,7 @@
 #   ARCH=x86-64-v3 (AVX2, default) | x86-64-v2 (older CPUs)
 #   VERSION=1.2.3                   version written into the DLL and shown by Far (default 1.0.0)
 #   OUT=dir                         default: dist/FarNitroView
-#   AVIF=0, SVG=0                   leave those out even when deps.sh has fetched them
+#   AVIF=0, SVG=0, PDF=0            leave those out even when deps.sh has fetched them
 set -e
 cd "$(dirname "$0")"
 ROOT=$PWD
@@ -32,7 +32,8 @@ CPU="-march=$ARCH"
 CFLAGS="-O3 $CPU -fblocks -Wall -Wno-unused-parameter -I$NITRO/src -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
 CXXFLAGS="$CFLAGS -std=c++20 -I$FARSDK $VDEFS -Wno-missing-field-initializers -Wno-unused-function"
 
-# optional decoders from deps.sh: AVIF (nitroavif + dav1d), SVG (lunasvg + plutovg)
+# optional decoders from deps.sh: AVIF (nitroavif + dav1d), SVG (lunasvg + plutovg), PDF (pdfium.dll
+# next to the plugin, found when it runs)
 DEPS=$ROOT/third_party/deps
 NITRO_SRC="nitrojpeg nitropng nitropsd nitroheic nitrohevc nitrodng nitrowebp nitrotiff nitro_load nitro_convert"
 NITRO_DEFS=""
@@ -58,7 +59,7 @@ for f in $NITRO_SRC; do
     "$CC" $CFLAGS $NITRO_DEFS -c "$NITRO/src/$f.c" -o "$OBJ/$f.o" & pids="$pids $!"
 done
 "$CC" $CFLAGS -c src/par.c -o "$OBJ/par.o" & pids="$pids $!"
-for f in plugin config viewer overlay render decode postproc; do
+for f in plugin config viewer overlay render decode postproc pdf; do
     "$CXX" $CXXFLAGS -c src/$f.cpp -o "$OBJ/$f.o" & pids="$pids $!"
 done
 case "$OPT" in *SVG*)
@@ -85,4 +86,14 @@ for p in $pids; do wait $p || fail=1; done
 cp package/* "$OUT/"
 cp "$NITRO/LICENSE" "$OUT/LICENSE-jpeg-nitro.txt"
 cp LICENSE "$OUT/LICENSE.txt"
+PDFIUM=$DEPS/pdfium
+if [ "${PDF:-1}" = 1 ] && [ -f "$PDFIUM/bin/pdfium.dll" ]; then
+    cp "$PDFIUM/bin/pdfium.dll" "$OUT/"
+    cp "$PDFIUM/LICENSE" "$OUT/LICENSE-pdfium.txt"
+    mkdir -p "$OUT/licenses-pdfium"
+    cp "$PDFIUM"/licenses/* "$OUT/licenses-pdfium/"
+    OPT="$OPT PDF"
+else
+    rm -rf "$OUT/pdfium.dll" "$OUT/LICENSE-pdfium.txt" "$OUT/licenses-pdfium"
+fi
 echo "built $OUT/FarNitroView.dll ($ARCH, $VERSION; optional decoders:${OPT:- none})"

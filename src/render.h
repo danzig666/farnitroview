@@ -1,6 +1,7 @@
 // FarNitroView for Far Manager: drawing an image into a BGRA buffer at any zoom and orientation.
 #pragma once
 #include "image.h"
+#include <functional>
 #include <vector>
 
 // Display -> source mapping of an orientation, on coordinates relative to the image centre:
@@ -31,15 +32,38 @@ struct ViewParams {
     int frame = 0;        // of an animation
 };
 
+class PdfView;
+
 class Renderer {
 public:
+    Renderer();
+    ~Renderer();
     // Fills dst (W x H BGRA, rows pitch bytes apart) with bg and draws the image. The image's
     // rectangle on screen is returned in *drawn (empty if it is outside).
     void Draw(const ImagePtr &im, const ViewParams &v, uint32_t bg, uint8_t *dst, size_t pitch, int W, int H,
               RECT *drawn = nullptr);
     void Clear() { cache_.clear(); cacheImage_.reset(); svgPx_.clear(); svgImage_.reset(); }
 
+    // A PDF page is rendered in the background and Draw shows what is there so far.
+    // notify: called (on that thread) when more is there.
+    void SetNotify(std::function<void()> notify) { pdfNotify_ = std::move(notify); }
+    // Better to leave the last frame on the screen than to draw now: nothing of this page is
+    // there yet, but it should be soon.
+    bool Hold(const ImagePtr &im, const ViewParams &v, int W, int H);
+    bool Busy() const;    // a page is being rendered
+    bool Blank() const { return pdfBlank_; }   // the last Draw showed an empty page, for lack of anything else
+    void Finish();        // until nothing is being rendered
+
 private:
+    // PDF
+    std::unique_ptr<PdfView> pdf_;
+    std::function<void()> pdfNotify_;
+    bool pdfBlank_ = false;
+    PdfView &Pdf();
+    void DrawPdf(const ImagePtr &im, const ViewParams &v, uint8_t *dst, size_t pitch, int W, int H, double left,
+                 double top);
+
+
     // the whole image, oriented and reduced to the current scale (scale < 1)
     std::vector<uint8_t> cache_;
     int cacheW_ = 0, cacheH_ = 0;

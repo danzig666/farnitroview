@@ -103,6 +103,8 @@ intptr_t WINAPI ConfigureW(const ConfigureInfo *) {
 HANDLE WINAPI AnalyseW(const AnalyseInfo *Info) {
     if (!Cfg.enterArchive || !Info->FileName || (Info->OpMode & (OPM_FIND | OPM_SILENT | OPM_QUICKVIEW | OPM_VIEW | OPM_EDIT | OPM_DESCR | OPM_COMMANDS)))
         return nullptr;
+    // (Enter on a PDF: its own program, unless asked otherwise; F3 and the quick view are ours anyway)
+    if (IsPdf(Info->FileName, Info->Buffer, Info->BufferSize)) return Cfg.pdfEnter && HavePdf() ? (HANDLE)1 : nullptr;
     if (!IsImageName(Info->FileName) && !IsImageSignature(Info->Buffer, Info->BufferSize)) return nullptr;
     return (HANDLE)1;
 }

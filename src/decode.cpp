@@ -1,6 +1,7 @@
 // FarNitroView for Far Manager: file -> Image, with jpeg-nitro's decoders and WIC as the fallback.
 #include "image.h"
 #include "par.h"
+#include "pdf.h"
 
 #include <algorithm>
 #include <climits>
@@ -62,9 +63,14 @@ static bool HasExt(const wchar_t *path, const wchar_t *e) {
 bool IsImageName(const wchar_t *path) {
     if (nv_is_image_name_w(path)) return true;
     if (HaveSvg() && HasExt(path, L"svg")) return true;
+    if (HasExt(path, L"pdf") && HavePdf()) return true;
     for (const wchar_t *const *e = kWicExts; *e; e++)
         if (HasExt(path, *e)) return true;
     return false;
+}
+
+bool IsPdf(const wchar_t *path, const void *data, size_t len) {
+    return HasExt(path, L"pdf") || (data && len >= 5 && !memcmp(data, "%PDF-", 5));
 }
 
 bool IsImageSignature(const void *data, size_t len) {
@@ -429,44 +435,74 @@ static bool DecodeSvg(const uint8_t *data, size_t len, Image *im, std::wstring *
 #endif
 
 // ---------------------------------------------------------------------------
+// PDF: only the page's size here, it is rendered when it is shown (and PDFium reads the file itself)
 
-ImagePtr DecodeImage(const std::wstring &path, uint32_t background, std::wstring *error, int page) {
-    LARGE_INTEGER t0, t1, fq;
-    QueryPerformanceCounter(&t0);
+static bool DecodePdf(const std::wstring &path, int page, Image *im, std::wstring *error) {
+    double pw = 0, ph = 0;
+    int pages = 1;
+    im->pdf = PdfOpenPage(path, page, &pages, &pw, &ph, error);
+    if (!im->pdf) return false;
+    im->w = std::max(1, (int)std::lround(pw * 96 / 72));
+    im->h = std::max(1, (int)std::lround(ph * 96 / 72));
+    im->page = im->pdf->index;
+    im->pages = pages;
+    im->decoder = L"PDFium";
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+
+// The file read into memory and given to the decoders. 0: decoded.
+static int DecodeFile(const std::wstring &path, uint32_t background, int page, Image *im, int *orientationOut,
+                      std::wstring *errOut) {
+    std::wstring &err = *errOut;
+    int &orientation = *orientationOut;
     std::string u8 = Utf8(path);
     size_t len = 0;
     int rawOrientation = 0, rawRead = 0;
     uint8_t *data = nv_read_image(u8.c_str(), &len, INT_MAX, &rawOrientation, &rawRead);
     if (!data) {
-        *error = L"Cannot read the file";
-        return nullptr;
+        err = L"Cannot read the file";
+        return -1;
     }
-    auto im = std::make_shared<Image>();
-    int orientation = 1;
-    std::wstring err;
+    if (IsPdf(path.c_str(), data, len)) {   // (under another name)
+        free(data);
+        return DecodePdf(path, page, im, &err) ? 0 : -1;
+    }
     int rc = 1;
 #ifdef NV_SVG
     if (HasExt(path.c_str(), L"svg") || (!IsImageName(path.c_str()) && IsImageSignature(data, len) &&
                                          len >= 5 && memchr(data, '<', len < 64 ? len : 64))) {
-        rc = DecodeSvg(data, len, im.get(), &err) ? 0 : -1;
+        rc = DecodeSvg(data, len, im, &err) ? 0 : -1;
         if (rc && !HasExt(path.c_str(), L"svg")) rc = 1;   // (not SVG after all: the others' turn)
     }
 #endif
     if (rc == 1 && page == 0) {
         size_t n = len;
-        rc = DecodeNitro(data, n, rawOrientation, rawRead, background, im.get(), &orientation, &err);
+        rc = DecodeNitro(data, n, rawOrientation, rawRead, background, im, &orientation, &err);
         if (rc == 0 && !rawRead && (HasExt(path.c_str(), L"tif") || HasExt(path.c_str(), L"tiff")))
             im->pages = WicPageCount(data, len);   // (nitrotiff: the first page)
     }
     if (rc == 1 || (rc != 0 && page > 0)) {
         // the platform's turn (a camera raw: its embedded JPEG, which nv_decode moved to the start)
         int o = orientation;
-        if (DecodeWic(data, len, background, im.get(), &o, &err, page)) {
+        if (DecodeWic(data, len, background, im, &o, &err, page)) {
             rc = 0;
             if (orientation == 1) orientation = o;
         }
     }
     free(data);
+    return rc;
+}
+
+ImagePtr DecodeImage(const std::wstring &path, uint32_t background, std::wstring *error, int page) {
+    LARGE_INTEGER t0, t1, fq;
+    QueryPerformanceCounter(&t0);
+    auto im = std::make_shared<Image>();
+    int orientation = 1;
+    std::wstring err;
+    const int rc = HasExt(path.c_str(), L"pdf") ? (DecodePdf(path, page, im.get(), &err) ? 0 : -1)
+                                                : DecodeFile(path, background, page, im.get(), &orientation, &err);
     if (rc) {
         *error = err.empty() ? L"Cannot decode image" : err;
         return nullptr;

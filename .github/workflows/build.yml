@@ -59,7 +59,7 @@ jobs:
           path: third_party/deps
           key: deps-${{ env.LLVM_MINGW_VERSION }}-${{ hashFiles('deps.sh', 'third_party/jpeg-nitro/scripts/get-deps.sh', 'third_party/jpeg-nitro/patches/lunasvg.patch') }}
 
-      - name: Optional decoder dependencies (lunasvg, dav1d)
+      - name: Optional decoder dependencies (lunasvg, dav1d, PDFium)
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: ./deps.sh
 
