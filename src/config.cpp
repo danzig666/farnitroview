@@ -95,8 +95,9 @@ static intptr_t WINAPI ConfigDlgProc(HANDLE dlg, intptr_t msg, intptr_t p1, void
 }
 
 bool Config::Dialog() {
-    bool b[16] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize, enlarge,
-                  keepPosition, loop,      ppAutolevels, ppAutoluma, ppChroma, pdf,     pdfEnter, pdfFitWidth};
+    bool b[15] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize, enlarge,
+                  keepPosition, loop,      ppAutolevels, ppAutoluma, ppChroma, pdf,     pdfEnter};
+    int pdfOpenFit = pdfFitWidth ? 0 : 1;
     wchar_t bgN[16], bgS[16], pfx[32], chr[16];
     swprintf(bgN, 16, L"%06X", bgNormal);
     swprintf(bgS, 16, L"%06X", bgSelected);
@@ -128,7 +129,8 @@ bool Config::Dialog() {
     d.AddText(MPdf);
     d.AddCheckbox(MPdfOpen, &b[13]);
     d.AddCheckbox(MPdfEnter, &b[14]);
-    d.AddCheckbox(MPdfFitWidth, &b[15]);
+    const int pdfFits[] = {MPdfFitWidth, MPdfFitPage};
+    d.AddRadioButtons(&pdfOpenFit, 2, pdfFits);
     d.ColumnBreak();
     d.AddText(MJumps);
     d.AddCheckbox(MKeepPosition, &b[8]);
@@ -164,7 +166,7 @@ bool Config::Dialog() {
     ppChroma = b[12];
     pdf = b[13];
     pdfEnter = b[14];
-    pdfFitWidth = b[15];
+    pdfFitWidth = pdfOpenFit == 0;
     SetPdfEnabled(pdf);
     double c = _wtof(chr);
     if (c > 0 && c <= 10) chroma = c;
