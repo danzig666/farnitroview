@@ -72,6 +72,28 @@ static bool ParseColor(const wchar_t *s, uint32_t *c) {
     return true;
 }
 
+// DlgBuilder's EndColumns() puts every item of the second column at the start of the column, even the
+// edit fields AddTextBefore had moved after their labels (and makes them one wider); where the column
+// starts is known only when the builder sizes the dialog, so the fields are moved back here.
+struct LabeledField {
+    intptr_t label, field;
+};
+
+static intptr_t WINAPI ConfigDlgProc(HANDLE dlg, intptr_t msg, intptr_t p1, void *p2) {
+    if (msg == DN_INITDIALOG) {
+        for (auto *f = (const LabeledField *)p2; f->label; f++) {
+            SMALL_RECT label, field;
+            PsInfo.SendDlgMessage(dlg, DM_GETITEMPOSITION, f->label, &label);
+            PsInfo.SendDlgMessage(dlg, DM_GETITEMPOSITION, f->field, &field);
+            const auto width = field.Right - field.Left;
+            field.Left = (SHORT)(label.Left + PsInfo.SendDlgMessage(dlg, DM_GETTEXT, f->label, nullptr) + 1);
+            field.Right = (SHORT)(field.Left + width - 1);
+            PsInfo.SendDlgMessage(dlg, DM_SETITEMPOSITION, f->field, &field);
+        }
+    }
+    return PsInfo.DefDlgProc(dlg, msg, p1, p2);
+}
+
 bool Config::Dialog() {
     bool b[16] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize, enlarge,
                   keepPosition, loop,      ppAutolevels, ppAutoluma, ppChroma, pdf,     pdfEnter, pdfFitWidth};
@@ -83,9 +105,16 @@ bool Config::Dialog() {
     pfx[31] = 0;
     std::wstring tpl = titleTemplate;
 
-    PluginDialogBuilder d(PsInfo, MainGuid, ConfigDialogGuid, MConfigTitle, L"Config");
+    LabeledField moved[4] = {};
+    PluginDialogBuilder d(PsInfo, MainGuid, ConfigDialogGuid, MConfigTitle, L"Config", ConfigDlgProc, moved);
     d.StartColumns();
-    d.AddText(MProcess);
+    const FarDialogItem *first = d.AddText(MProcess);  // item 1: item 0 is the border
+    int nMoved = 0;
+    const auto addField = [&](wchar_t *value, int width, int labelId) {
+        const FarDialogItem *field = d.AddEditField(value, 16, width);
+        const FarDialogItem *label = d.AddTextBefore(const_cast<FarDialogItem *>(field), labelId);
+        moved[nMoved++] = {label - first + 1, field - first + 1};
+    };
     d.AddCheckbox(MEnterArchive, &b[0]);
     d.AddCheckbox(MQuickView, &b[1]);
     d.AddCheckbox(MView, &b[2]);
@@ -108,10 +137,10 @@ bool Config::Dialog() {
     d.AddCheckbox(MAutolevels, &b[10]);
     d.AddCheckbox(MAutoluma, &b[11]);
     d.AddCheckbox(MChroma, &b[12]);
-    d.AddTextBefore(d.AddEditField(chr, 16, 6), MChromaMul);
+    addField(chr, 6, MChromaMul);
     d.AddText(MBackground);
-    d.AddTextBefore(d.AddEditField(bgN, 16, 8), MBgNormal);
-    d.AddTextBefore(d.AddEditField(bgS, 16, 8), MBgSelected);
+    addField(bgN, 8, MBgNormal);
+    addField(bgS, 8, MBgSelected);
     d.EndColumns();
     d.AddSeparator();
     d.AddText(MTitleTemplate);
