@@ -18,6 +18,7 @@ CC="${BIN}x86_64-w64-mingw32-clang"
 CXX="${BIN}x86_64-w64-mingw32-clang++"
 RC="${BIN}x86_64-w64-mingw32-windres"
 ARCH=${ARCH:-x86-64-v3}
+[ -n "${VERSION:-}" ] || DEV="-DNV_DEV_BUILD"   # (no version given: not a release, it does not look for updates by itself)
 VERSION=${VERSION:-1.0.0}
 OUT=${OUT:-$ROOT/dist/FarNitroView}
 OBJ=$ROOT/build/obj-$ARCH
@@ -30,7 +31,8 @@ mkdir -p "$OBJ" "$OUT"
 CPU="-march=$ARCH"
 [ "$ARCH" = x86-64-v3 ] && CPU="$CPU -mbranches-within-32B-boundaries"
 CFLAGS="-O3 $CPU -fblocks -Wall -Wno-unused-parameter -I$NITRO/src -D_WIN32_WINNT=0x0A00 -DUNICODE -D_UNICODE"
-CXXFLAGS="$CFLAGS -std=c++20 -I$FARSDK $VDEFS -Wno-missing-field-initializers -Wno-unused-function"
+CXXFLAGS="$CFLAGS -std=c++20 -I$FARSDK $VDEFS ${DEV:-} -Wno-missing-field-initializers -Wno-unused-function"
+[ "$ARCH" = x86-64-v3 ] || CXXFLAGS="$CXXFLAGS -DNV_NOAVX2"   # (which zip of a release is the update of this build)
 
 # optional decoders from deps.sh: AVIF (nitroavif + dav1d), SVG (lunasvg + plutovg), PDF (pdfium.dll
 # next to the plugin, found when it runs)
@@ -59,7 +61,7 @@ for f in $NITRO_SRC; do
     "$CC" $CFLAGS $NITRO_DEFS -c "$NITRO/src/$f.c" -o "$OBJ/$f.o" & pids="$pids $!"
 done
 "$CC" $CFLAGS -c src/par.c -o "$OBJ/par.o" & pids="$pids $!"
-for f in plugin config viewer overlay render decode postproc pdf; do
+for f in plugin config viewer overlay render decode postproc pdf update; do
     "$CXX" $CXXFLAGS -c src/$f.cpp -o "$OBJ/$f.o" & pids="$pids $!"
 done
 case "$OPT" in *SVG*)
@@ -82,7 +84,7 @@ fail=0
 for p in $pids; do wait $p || fail=1; done
 [ $fail = 0 ] || { echo "compile failed" >&2; exit 1; }
 
-"$CXX" -shared -static -O3 -o "$OUT/FarNitroView.dll" "$OBJ"/*.o $SVG_OBJS $LIBS src/farnitroview.def     -lwindowscodecs -lole32 -loleaut32 -lshlwapi -luiautomationcore -luser32 -lgdi32 -luuid -lpthread     -Wl,--gc-sections -s
+"$CXX" -shared -static -O3 -o "$OUT/FarNitroView.dll" "$OBJ"/*.o $SVG_OBJS $LIBS src/farnitroview.def     -lwindowscodecs -lole32 -loleaut32 -lshlwapi -lshell32 -lwinhttp -lbcrypt -luiautomationcore -luser32 -lgdi32 -luuid -lpthread     -Wl,--gc-sections -s
 cp package/* "$OUT/"
 cp "$NITRO/LICENSE" "$OUT/LICENSE-jpeg-nitro.txt"
 cp LICENSE "$OUT/LICENSE.txt"

@@ -16,6 +16,8 @@ PY=${PYTHON:-python}
 "${BIN}x86_64-w64-mingw32-clang++" -O2 -std=c++20 -march=$ARCH -municode $DEFS -Ithird_party/jpeg-nitro/src \
     test/harness.cpp $O/decode.o $O/render.o $O/pdf.o $O/postproc.o $O/par.o $O/nitro*.o $O/svg/*.o $DAV1D -static \
     -lwindowscodecs -lole32 -loleaut32 -lshlwapi -luuid -lpthread -o build/harness.exe
+"${BIN}x86_64-w64-mingw32-clang++" -O2 -std=c++20 -municode test/update_test.cpp $O/update.o -static \
+    -lwinhttp -lbcrypt -o build/update_test.exe
 "$PY" -I test/mkimages.py test/images
 PDFS=""
 if [ -f third_party/deps/pdfium/bin/pdfium.dll ]; then
@@ -23,6 +25,7 @@ if [ -f third_party/deps/pdfium/bin/pdfium.dll ]; then
     PDFS="vector.pdf damaged.pdf"
 fi
 cd test/images
+if [ -n "$PDFS" ]; then ../../build/update_test.exe; else echo "update test skipped (it needs pdfium.dll as a DLL to lock)"; fi
 ../../build/harness.exe base420.jpg prog.jpg s444.jpg gray.jpg orient6.jpg cmyk.jpg rgba.png rgb.png pal.png \
     lzw.tif lossy.webp lossless.webp anim.gif plain.bmp big.jpg tiny.png anim6.gif pages3.tif \
     $(ls vector.svg photo.avif 2>/dev/null) $PDFS | tee ../../build/test-results.txt

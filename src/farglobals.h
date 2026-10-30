@@ -22,6 +22,10 @@ static const GUID MenuGuid = {0x242dcd8f, 0xa8be, 0x40e1, {0xbe, 0x3c, 0xad, 0x6
 static const GUID ConfigMenuGuid = {0x6141b682, 0x177f, 0x40ad, {0x9f, 0x33, 0x0b, 0x69, 0xef, 0xcf, 0xcc, 0x00}};
 // {70B67C20-725A-46A7-AD32-49AE152C3766}
 static const GUID ConfigDialogGuid = {0x70b67c20, 0x725a, 0x46a7, {0xad, 0x32, 0x49, 0xae, 0x15, 0x2c, 0x37, 0x66}};
+// {5B1E7C42-9D3A-4F68-8C21-6A0F4E2D7B93}
+static const GUID UpdateMenuGuid = {0x5b1e7c42, 0x9d3a, 0x4f68, {0x8c, 0x21, 0x6a, 0x0f, 0x4e, 0x2d, 0x7b, 0x93}};
+// {C7A4D016-3E85-4B2F-A9D7-18F3B6C05E2A}
+static const GUID UpdateMessageGuid = {0xc7a4d016, 0x3e85, 0x4b2f, {0xa9, 0xd7, 0x18, 0xf3, 0xb6, 0xc0, 0x5e, 0x2a}};
 // {E348932A-F09B-45B5-BAD8-880D41DE3667}
 static const GUID ErrorMessageGuid = {0xe348932a, 0xf09b, 0x45b5, {0xba, 0xd8, 0x88, 0x0d, 0x41, 0xde, 0x36, 0x67}};
 
@@ -65,6 +69,21 @@ enum LangId {
     MPdfEnter,
     MPdfFitWidth,
     MPdfFitPage,
+    MUpdates,
+    MUpdateCheck,
+    MUpdateMenu,
+    MUpdateAvailable,
+    MUpdateNow,
+    MUpdateLater,
+    MUpdateSkip,
+    MUpdateChecking,
+    MUpdateDownloading,
+    MUpdateDone,
+    MUpdateFailed,
+    MUpdateLatest,
+    MUpdateNoAccess,
+    MUpdateOpenPage,
+    MUpdateClose,
 };
 
 const wchar_t *GetMsg(int id);
@@ -90,6 +109,9 @@ struct Config {
     bool pdf = true;            // PDF files are shown (F3, the quick view ...)
     bool pdfEnter = false;      // ... on Enter too (else Enter opens them with their own program)
     bool pdfFitWidth = true;    // they open fitted to the width, from the top of the page (else the whole page)
+    bool updateCheck = true;    // look for a new release once a day
+    unsigned __int64 updateLast = 0;   // when it last did (seconds, time64)
+    std::wstring updateSkip;    // the version the user said not to ask about again
     // {name} {path} {dir} {index} {count} {width} {height} {zoom} {decoder} {ms} {size} {page}
     // {pages} {pageinfo} {pp} {selected}
     std::wstring titleTemplate =

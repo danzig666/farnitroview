@@ -5,14 +5,19 @@
 // view panel, from the plugin menu and with the "nv:" command prefix.
 #include "farglobals.h"
 #include "image.h"
+#include "update.h"
 #include "viewer.h"
 
+#include <ctime>
+#include <mutex>
+#include <shellapi.h>
+#include <thread>
 #include <vector>
 
 PluginStartupInfo PsInfo;
 FarStandardFunctions FSF;
 
-enum { SYNC_OPEN = 1, SYNC_QVIEW = 2 };
+enum { SYNC_OPEN = 1, SYNC_QVIEW = 2, SYNC_UPDATE = 3 };
 
 static std::wstring PendingOpen;   // F3: the image to open once Far is back in the panels
 static bool PendingIntercepted;
@@ -59,6 +64,135 @@ static bool IsFile(const std::wstring &p) {
 }
 
 // ---------------------------------------------------------------------------
+// updates: once a day a thread asks GitHub, the prompt waits until Far shows its panels
+
+#ifdef NV_NOAVX2
+static const bool kNoAvx2 = true;
+#else
+static const bool kNoAvx2 = false;
+#endif
+
+static std::thread UpdateThread;
+static HANDLE UpdateStop;
+static std::mutex UpdateMu;
+static bool UpdateAnswered, UpdateHandled;   // the thread has its answer; it has been dealt with
+static UpdateInfo UpdateFound;               // (version empty: nothing new)
+
+static bool IsNewerThanThis(const std::wstring &v) {
+    return UpdateIsNewer(v, NV_VERSION_MAJOR, NV_VERSION_MINOR, NV_VERSION_BUILD);
+}
+
+static void UpdateCheckThread(std::wstring skip) {
+    if (WaitForSingleObject(UpdateStop, 5000) != WAIT_TIMEOUT) return;   // (not while Far starts)
+    UpdateInfo info;
+    std::wstring err;
+    if (!UpdateFetchLatest(kNoAvx2, &info, &err)) return;   // (the next start tries again)
+    {
+        std::lock_guard<std::mutex> l(UpdateMu);
+        if (IsNewerThanThis(info.version) && info.version != skip) UpdateFound = info;
+        UpdateAnswered = true;
+    }
+    for (;;) {
+        PsInfo.AdvControl(&MainGuid, ACTL_SYNCHRO, 0, (void *)(intptr_t)SYNC_UPDATE);
+        if (WaitForSingleObject(UpdateStop, 30000) != WAIT_TIMEOUT) return;
+        std::lock_guard<std::mutex> l(UpdateMu);
+        if (UpdateHandled) return;
+    }
+}
+
+static void UpdateStartThread() {
+#ifndef NV_DEV_BUILD
+    if (!Cfg.updateCheck || (unsigned __int64)_time64(nullptr) - Cfg.updateLast < 24 * 3600) return;
+    UpdateStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    UpdateThread = std::thread(UpdateCheckThread, Cfg.updateSkip);
+#endif
+}
+
+static void UpdateStopThread() {
+    if (!UpdateThread.joinable()) return;
+    SetEvent(UpdateStop);
+    UpdateCancel();
+    UpdateThread.join();
+    CloseHandle(UpdateStop);
+}
+
+// a message that stays on the screen while something is being done
+template <class F> static void WithNotice(int textId, F work) {
+    HANDLE screen = PsInfo.SaveScreen(0, 0, -1, -1);
+    const wchar_t *msg[] = {GetMsg(MTitle), GetMsg(textId)};
+    PsInfo.Message(&MainGuid, &UpdateMessageGuid, FMSG_NONE, nullptr, msg, 2, 0);
+    work();
+    PsInfo.RestoreScreen(screen);
+}
+
+static void UpdateShowFailure(const UpdateInfo &info, const std::wstring &what) {
+    const wchar_t *msg[] = {GetMsg(MTitle), GetMsg(MUpdateFailed), what.c_str(), GetMsg(MUpdateOpenPage), GetMsg(MUpdateClose)};
+    if (PsInfo.Message(&MainGuid, &UpdateMessageGuid, FMSG_WARNING, nullptr, msg, 5, 2) == 0)
+        ShellExecuteW(nullptr, L"open", info.page.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+static void UpdateAsk(const UpdateInfo &info) {
+    wchar_t text[256];
+    swprintf(text, 256, GetMsg(MUpdateAvailable), info.version.c_str(), NV_VERSION_MAJOR, NV_VERSION_MINOR, NV_VERSION_BUILD);
+    const wchar_t *msg[] = {GetMsg(MTitle), text, GetMsg(MUpdateNow), GetMsg(MUpdateLater), GetMsg(MUpdateSkip)};
+    const intptr_t answer = PsInfo.Message(&MainGuid, &UpdateMessageGuid, FMSG_NONE, nullptr, msg, 5, 3);
+    if (answer == 2) {
+        Cfg.updateSkip = info.version;
+        Cfg.Save();
+    }
+    if (answer != 0) return;
+    const std::wstring dir = UpdatePluginDir();
+    std::wstring err;
+    bool noAccess = false, ok = false;
+    WithNotice(MUpdateDownloading, [&] { ok = UpdateInstall(info, dir, &err, &noAccess); });
+    if (ok) {
+        const wchar_t *done[] = {GetMsg(MTitle), GetMsg(MUpdateDone)};
+        PsInfo.Message(&MainGuid, &UpdateMessageGuid, FMSG_MB_OK, nullptr, done, 2, 0);
+    } else
+        UpdateShowFailure(info, noAccess ? std::wstring(GetMsg(MUpdateNoAccess)) + L" " + dir : err);
+}
+
+// the thread's answer, once Far shows its panels
+static void UpdateOnSynchro() {
+    WindowType wt = {sizeof wt};
+    if (!PsInfo.AdvControl(&MainGuid, ACTL_GETWINDOWTYPE, 0, &wt) || wt.Type != WTYPE_PANELS) return;
+    UpdateInfo info;
+    {
+        std::lock_guard<std::mutex> l(UpdateMu);
+        if (!UpdateAnswered || UpdateHandled) return;
+        UpdateHandled = true;
+        info = UpdateFound;
+    }
+    Cfg.updateLast = (unsigned __int64)_time64(nullptr);
+    Cfg.Save();
+    if (info.version.empty()) return;
+    QuickViewSuspend(true);
+    UpdateAsk(info);
+    QuickViewSuspend(false);
+}
+
+// the plugins menu's "Check for updates"
+static void UpdateCheckNow() {
+    QuickViewSuspend(true);
+    UpdateInfo info;
+    std::wstring err;
+    bool ok = false;
+    WithNotice(MUpdateChecking, [&] { ok = UpdateFetchLatest(kNoAvx2, &info, &err); });
+    if (!ok) {
+        const wchar_t *msg[] = {GetMsg(MTitle), GetMsg(MUpdateFailed), err.c_str()};
+        PsInfo.Message(&MainGuid, &UpdateMessageGuid, FMSG_WARNING | FMSG_MB_OK, nullptr, msg, 3, 0);
+    } else if (IsNewerThanThis(info.version)) {
+        UpdateAsk(info);
+    } else {
+        wchar_t text[128];
+        swprintf(text, 128, GetMsg(MUpdateLatest), NV_VERSION_MAJOR, NV_VERSION_MINOR, NV_VERSION_BUILD);
+        const wchar_t *msg[] = {GetMsg(MTitle), text};
+        PsInfo.Message(&MainGuid, &UpdateMessageGuid, FMSG_MB_OK, nullptr, msg, 2, 0);
+    }
+    QuickViewSuspend(false);
+}
+
+// ---------------------------------------------------------------------------
 
 extern "C" {
 
@@ -77,16 +211,20 @@ void WINAPI SetStartupInfoW(const PluginStartupInfo *Info) {
     FSF = *Info->FSF;
     PsInfo.FSF = &FSF;
     Cfg.Load();
+    UpdateCleanup(UpdatePluginDir());
+    UpdateStartThread();
 }
 
 void WINAPI GetPluginInfoW(PluginInfo *Info) {
     Info->StructSize = sizeof *Info;
     Info->Flags = PF_VIEWER | PF_EDITOR;
-    static const wchar_t *menu[1];
+    static const wchar_t *menu[2];
+    static const GUID menuGuids[2] = {MenuGuid, UpdateMenuGuid};
     menu[0] = GetMsg(MTitle);
-    Info->PluginMenu.Guids = &MenuGuid;
+    menu[1] = GetMsg(MUpdateMenu);
+    Info->PluginMenu.Guids = menuGuids;
     Info->PluginMenu.Strings = menu;
-    Info->PluginMenu.Count = 1;
+    Info->PluginMenu.Count = 2;
     Info->PluginConfig.Guids = &ConfigMenuGuid;
     Info->PluginConfig.Strings = menu;
     Info->PluginConfig.Count = 1;
@@ -112,6 +250,10 @@ HANDLE WINAPI AnalyseW(const AnalyseInfo *Info) {
 void WINAPI CloseAnalyseW(const CloseAnalyseInfo *) {}
 
 HANDLE WINAPI OpenW(const OpenInfo *Info) {
+    if (Info->Guid && IsEqualGUID(*Info->Guid, UpdateMenuGuid)) {
+        UpdateCheckNow();
+        return nullptr;
+    }
     std::wstring path;
     switch (Info->OpenFrom) {
     case OPEN_ANALYSE: {
@@ -226,10 +368,16 @@ intptr_t WINAPI ProcessSynchroEventW(const ProcessSynchroEventInfo *Info) {
     case SYNC_QVIEW:
         QuickViewValidate();
         break;
+    case SYNC_UPDATE:
+        UpdateOnSynchro();
+        break;
     }
     return 0;
 }
 
-void WINAPI ExitFARW(const ExitInfo *) { ShutdownViewers(); }
+void WINAPI ExitFARW(const ExitInfo *) {
+    UpdateStopThread();
+    ShutdownViewers();
+}
 
 }   // extern "C"

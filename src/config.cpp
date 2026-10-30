@@ -35,6 +35,9 @@ void Config::Load() {
     pdf = s.Get(0, L"Pdf", pdf);
     pdfEnter = s.Get(0, L"PdfEnter", pdfEnter);
     pdfFitWidth = s.Get(0, L"PdfFitWidth", pdfFitWidth);
+    updateCheck = s.Get(0, L"UpdateCheck", updateCheck);
+    updateLast = s.Get(0, L"UpdateLast", updateLast);
+    updateSkip = s.Get(0, L"UpdateSkip", updateSkip.c_str());
     SetPdfEnabled(pdf);
 }
 
@@ -61,6 +64,9 @@ void Config::Save() const {
     s.Set(0, L"Pdf", pdf);
     s.Set(0, L"PdfEnter", pdfEnter);
     s.Set(0, L"PdfFitWidth", pdfFitWidth);
+    s.Set(0, L"UpdateCheck", updateCheck);
+    s.Set(0, L"UpdateLast", updateLast);
+    s.Set(0, L"UpdateSkip", updateSkip.c_str());
 }
 
 static bool ParseColor(const wchar_t *s, uint32_t *c) {
@@ -95,8 +101,8 @@ static intptr_t WINAPI ConfigDlgProc(HANDLE dlg, intptr_t msg, intptr_t p1, void
 }
 
 bool Config::Dialog() {
-    bool b[15] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize, enlarge,
-                  keepPosition, loop,      ppAutolevels, ppAutoluma, ppChroma, pdf,     pdfEnter};
+    bool b[16] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize, enlarge,
+                  keepPosition, loop,      ppAutolevels, ppAutoluma, ppChroma, pdf,     pdfEnter, updateCheck};
     int pdfOpenFit = pdfFitWidth ? 0 : 1;
     wchar_t bgN[16], bgS[16], pfx[32], chr[16];
     swprintf(bgN, 16, L"%06X", bgNormal);
@@ -143,6 +149,8 @@ bool Config::Dialog() {
     d.AddText(MBackground);
     addField(bgN, 8, MBgNormal);
     addField(bgS, 8, MBgSelected);
+    d.AddText(MUpdates);
+    d.AddCheckbox(MUpdateCheck, &b[15]);
     d.EndColumns();
     d.AddSeparator();
     d.AddText(MTitleTemplate);
@@ -167,6 +175,7 @@ bool Config::Dialog() {
     pdf = b[13];
     pdfEnter = b[14];
     pdfFitWidth = pdfOpenFit == 0;
+    updateCheck = b[15];
     SetPdfEnabled(pdf);
     double c = _wtof(chr);
     if (c > 0 && c <= 10) chroma = c;
