@@ -924,8 +924,14 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
     case VK_F6: SetPostProcess(pp_ ^ PP_CHROMA); return;
     case VK_F7: SetPostProcess(pp_ ^ PP_AUTOLUMA); return;
     case VK_F8: SetPostProcess(pp_ ^ PP_AUTOLEVELS); return;
-    case VK_HOME: case 'R': Go(0, ctrl); return;
-    case VK_END: case 'T': Go((int)items_.size() - 1, ctrl); return;
+    case VK_HOME: case 'R':
+        if (!alt && !ctrl && !shift && PdfPaged()) GoPage(0, false);
+        else Go(0, ctrl);
+        return;
+    case VK_END: case 'T':
+        if (!alt && !ctrl && !shift && PdfPaged()) GoPage(raw_->pages - 1, false);
+        else Go((int)items_.size() - 1, ctrl);
+        return;
 
     case 'F': case VK_CLEAR: SetFullscreen(!fullscreen_); return;
     case VK_NUMPAD5: SetFullscreen(!fullscreen_); return;

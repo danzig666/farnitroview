@@ -75,8 +75,15 @@ rotation (`test/`).
 1. Download the [latest release](https://github.com/danzig666/farnitroview/releases/latest):
    - `FarNitroView-x.y.z-x64.zip` — for CPUs with AVX2 (Intel Haswell 2013+, AMD Zen 2017+), fastest;
    - `FarNitroView-x.y.z-x64-noavx2.zip` — for any x64 CPU.
-2. Unpack it into `Far Manager\Plugins\` (you get `Plugins\FarNitroView\`).
+2. Unpack it into `%APPDATA%\Far Manager\Profile\Plugins\` (you get `Plugins\FarNitroView\`). `Far Manager\Plugins\`
+   works too, but under Program Files the plugin cannot update itself.
 3. Restart Far.
+
+**Updates**: once a day the plugin asks GitHub whether there is a new release and, if there is, asks
+you whether to install it (or F11 → *FarNitroView: check for updates*). It verifies the download's
+SHA-256, keeps the old files until the swap has succeeded, and the new version runs after Far's next
+start. Only the update check goes to GitHub, nothing about you or your files. *Check for updates daily*
+in the settings turns it off.
 
 Requires Far Manager **3.0 build 6699** or newer, 64-bit, on Windows 10 / 11.
 
@@ -96,7 +103,7 @@ The key map follows PictureView's last build (2018.12.11).
 | the same in a PDF of several pages | plain: next / previous page, stopping at the first and last; <kbd>Alt</kbd>: next / previous file (one page: plain and <kbd>Alt</kbd> both go to the next file) |
 | wheel over a PDF | scrolls the page, at its edge on to the next page, stopping at the first and last (one page: on to the next file) |
 | <kbd>Pause</kbd> | pause / resume an animation |
-| <kbd>Home</kbd>/<kbd>End</kbd>, <kbd>R</kbd>/<kbd>T</kbd> | first / last image |
+| <kbd>Home</kbd>/<kbd>End</kbd>, <kbd>R</kbd>/<kbd>T</kbd> | first / last image; in a PDF of several pages its first / last page (<kbd>Alt</kbd>: the first / last file) |
 | <kbd>~</kbd> | back to the previous image (and forth again) |
 | <kbd>F</kbd>, <kbd>Num 5</kbd>, <kbd>Alt-Enter</kbd>, middle click | full screen on / off |
 | <kbd>*</kbd>, <kbd>9</kbd> | 100% (a PDF page: fitted into the window) |
@@ -127,6 +134,7 @@ The key map follows PictureView's last build (2018.12.11).
 - **keep position on jumps**, **loop jumping**
 - **background colours** (hex `RRGGBB`) for normal and for selected files
 - **post-processing** on at the start (auto-levels, auto-luma, chroma) and the **chroma multiplier** (default 1.5)
+- **check for updates daily**
 - the **title template** — `{name}` `{path}` `{dir}` `{index}` `{count}` `{width}` `{height}` `{zoom}`
   `{decoder}` `{ms}` `{size}` `{page}` `{pages}` `{pageinfo}` `{pp}` `{selected}`; the default is
   `FarNitroView: [{index}/{count}] {name}  {width} × {height}  {zoom}  {decoder} {ms} ms{pageinfo}{pp}{selected}`
@@ -172,6 +180,7 @@ and publishes the zips.
 | [`src/render.cpp`](src/render.cpp) | zoom and orientation: an area-averaged reduction cache, bilinear / pixel-exact enlarging, all multi-threaded |
 | [`src/decode.cpp`](src/decode.cpp) | jpeg-nitro → BGRA, SVG, WIC as the fallback (pages, GIF animation composited frame by frame), transparency over the background |
 | [`src/pdf.cpp`](src/pdf.cpp) | PDFium, loaded on first use: documents kept open while in use, pages rendered in slices on a thread of their own, the latest request only |
+| [`src/update.cpp`](src/update.cpp) | updates from the GitHub releases: the check, the download, its SHA-256, swapping the files with a way back |
 | [`src/postproc.cpp`](src/postproc.cpp) | auto-levels, auto-luma, chroma |
 | [`src/config.cpp`](src/config.cpp) | settings and the dialog |
 

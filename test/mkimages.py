@@ -77,8 +77,17 @@ def pdf(path, pages):
 page1 = b"0.122 0.435 0.922 rg 0 0 400 250 re f 1 0.827 0.239 rg 100 50 200 150 re f 0.843 0.227 0.286 rg 10 10 40 40 re f"
 pdf(f"{out}/vector.pdf", [(400, 250, 0, page1), (400, 250, 90, page1), (300, 300, 0, b"0 0.5 1 rg 0 0 300 300 re f")])
 open(f"{out}/damaged.pdf", "wb").write(b"%PDF-1.7\nnothing a reader could use\n" * 50)
+# for the updater's test: a release's zip, and one without the plugin in it
+import shutil, zipfile
+with zipfile.ZipFile(f"{out}/update-ok.zip", "w") as z:
+    z.writestr("FarNitroView/FarNitroView.dll", "new dll")
+    z.writestr("FarNitroView/FarNitroViewEng.lng", "new lng")
+    z.writestr("FarNitroView/licenses-pdfium/a.txt", "new license")
+with zipfile.ZipFile(f"{out}/update-nodll.zip", "w") as z:
+    z.writestr("FarNitroView/FarNitroViewEng.lng", "new lng")
+shutil.rmtree(f"{out}/plugin", ignore_errors=True)
 for f in sorted(os.listdir(out)):
-    if f.endswith((".rgb", ".pdf")): continue
+    if f.endswith((".rgb", ".pdf", ".zip")) or f == "plugin": continue
     try:
         r = Image.open(f"{out}/{f}")
         from PIL import ImageOps
