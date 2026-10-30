@@ -123,7 +123,7 @@ The key map follows PictureView's last build (2018.12.11).
 - **full screen on startup**, **smooth scaling**, **information line**
 - **autosize on open** (fit large images), **enlarge small images**
 - **PDF**: **open PDF files** (F3, Ctrl-Q), **Enter opens PDFs here too** (off: Enter starts their own
-  program), **fit to width on open** (100% is the page at 96 dpi)
+  program), **fit to width on open** or **fit whole page on open**
 - **keep position on jumps**, **loop jumping**
 - **background colours** (hex `RRGGBB`) for normal and for selected files
 - **post-processing** on at the start (auto-levels, auto-luma, chroma) and the **chroma multiplier** (default 1.5)

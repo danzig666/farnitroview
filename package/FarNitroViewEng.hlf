@@ -124,8 +124,8 @@ $ #FarNitroView: settings#
 
  #Open PDF files#         Show PDF files on F3 and in the quick view (needs pdfium.dll).
  #Enter opens PDFs here too#  Enter and Ctrl-PgDn too, instead of their own program.
- #Fit to width on open#   PDF pages open as wide as the window, from the top; otherwise as
-                         "Autosize on image open" says. 100% is the page at 96 dpi.
+ #Fit to width on open#   PDF pages open as wide as the window, from the top.
+ #Fit whole page on open# PDF pages open with the whole page in the window.
 
  #Keep position on jumps# The zoom and the position stay when going to another image.
  #Loop jumping#           After the last image the first, before the first the last.

@@ -667,8 +667,8 @@ void Viewer::CheckLoaded() {
             cy_ = land == LandTop ? 0 : oh;
             Clamp();
         }
-    } else if (img_->pdf && Cfg.pdfFitWidth) {
-        ApplyFit(Fit::Width);
+    } else if (img_->pdf) {
+        ApplyFit(Cfg.pdfFitWidth ? Fit::Width : Fit::Both);
     } else if (Cfg.autosize) {
         ApplyFit(Fit::Both);
     } else {

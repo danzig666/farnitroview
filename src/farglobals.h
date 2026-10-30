@@ -64,6 +64,7 @@ enum LangId {
     MPdfOpen,
     MPdfEnter,
     MPdfFitWidth,
+    MPdfFitPage,
 };
 
 const wchar_t *GetMsg(int id);
@@ -88,7 +89,7 @@ struct Config {
     double chroma = 1.5;        // F6's saturation multiplier
     bool pdf = true;            // PDF files are shown (F3, the quick view ...)
     bool pdfEnter = false;      // ... on Enter too (else Enter opens them with their own program)
-    bool pdfFitWidth = true;    // they open fitted to the width, from the top of the page
+    bool pdfFitWidth = true;    // they open fitted to the width, from the top of the page (else the whole page)
     // {name} {path} {dir} {index} {count} {width} {height} {zoom} {decoder} {ms} {size} {page}
     // {pages} {pageinfo} {pp} {selected}
     std::wstring titleTemplate =
