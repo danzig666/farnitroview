@@ -65,7 +65,7 @@ $ #FarNitroView: keys and mouse#
     Zoom 100%. A PDF page is fitted into the window instead.
 
  #/#, #0#, #Tab#, double click on the image
-    Toggle: fit to the screen / 100%.
+    Toggle: fit to the screen / 100%. A PDF page: fit to the screen / to the width.
 
  #*#, #9#, #/#, #0#, #Tab# with #Ctrl# / #Shift# / #Alt#
     Fit to the screen / to the width / to the height.

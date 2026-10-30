@@ -100,7 +100,7 @@ The key map follows PictureView's last build (2018.12.11).
 | <kbd>~</kbd> | back to the previous image (and forth again) |
 | <kbd>F</kbd>, <kbd>Num 5</kbd>, <kbd>Alt-Enter</kbd>, middle click | full screen on / off |
 | <kbd>*</kbd>, <kbd>9</kbd> | 100% (a PDF page: fitted into the window) |
-| <kbd>/</kbd>, <kbd>0</kbd>, <kbd>Tab</kbd>, double click on the image | fit ↔ 100% |
+| <kbd>/</kbd>, <kbd>0</kbd>, <kbd>Tab</kbd>, double click on the image | fit ↔ 100% (a PDF page: fit ↔ fit to width) |
 | the same with <kbd>Ctrl</kbd> / <kbd>Shift</kbd> / <kbd>Alt</kbd> | fit to screen / to width / to height |
 | double click on the background | fit to width or height, whichever fills the screen |
 | <kbd>+</kbd>/<kbd>−</kbd>, <kbd>E</kbd>/<kbd>Q</kbd>, wheel with the left button or <kbd>Ctrl</kbd> held | zoom in √2 steps, stopping at 100% and at fit (<kbd>Alt</kbd>: fine, <kbd>Ctrl-Alt</kbd>: finer); the wheel zooms around the pointer |

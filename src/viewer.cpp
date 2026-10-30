@@ -758,6 +758,11 @@ void Viewer::Pan(double dx, double dy) {
 
 void Viewer::ToggleFit100(double ax, double ay) {
     if (!img_) return;
+    if (img_->pdf) {   // (no 100% here, see Zoom100: the whole page, or as wide as the window)
+        ApplyFit(fit_ == Fit::Both || std::fabs(scale_ - FitScale(Fit::Both)) < 1e-6 ? Fit::Width : Fit::Both);
+        Refresh();
+        return;
+    }
     if (fit_ == Fit::Both || std::fabs(scale_ - FitScale(Fit::Both)) < 1e-6) {
         if (std::fabs(scale_ - 1) < 1e-6) return;
         ZoomTo(1, ax, ay);
