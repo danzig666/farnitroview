@@ -3,7 +3,8 @@
 #   lunasvg + plutovg (MIT)       SVG, at the commit jpeg-nitro uses, with its patch
 #   dav1d (BSD-2-Clause)          AV1 for AVIF, static, built with llvm-mingw; meson + ninja from
 #                                 pip (in a venv of their own), nasm from nasm.us
-# build.sh uses whatever is there (SVG / AVIF are left out when it is missing).
+#   PDFium (Apache-2.0, BSD-3)    PDF, the prebuilt pdfium.dll of bblanchon/pdfium-binaries
+# build.sh uses whatever is there (SVG / AVIF / PDF are left out when it is missing).
 #   LLVM_MINGW=path/to/llvm-mingw (default: ext/llvm-mingw-*, else clang on PATH)
 #   PYTHON=python3 interpreter for meson (default: python)
 set -eu
@@ -15,6 +16,8 @@ mkdir -p "$D"
 LUNASVG_COMMIT=$(sed -n 's/^LUNASVG_COMMIT=\([0-9a-f]*\).*/\1/p' "$NITRO/scripts/get-deps.sh")
 DAV1D_VER=$(sed -n 's/^DAV1D_VER=\([0-9.]*\).*/\1/p' "$NITRO/scripts/get-deps.sh")
 NASM_VER=2.16.03
+PDFIUM_VER=8125
+PDFIUM_SHA256=9a964261760cff52570aabf038ab346d3a5034dd8b30d0d5fe8861235d356b8b
 LLVM_MINGW=${LLVM_MINGW:-$(ls -d "$ROOT"/ext/llvm-mingw-* 2>/dev/null | head -1)}
 if [ -n "$LLVM_MINGW" ]; then BIN="$LLVM_MINGW/bin"; else BIN=$(dirname "$(command -v x86_64-w64-mingw32-clang)"); fi
 PY=${PYTHON:-python}
@@ -63,4 +66,15 @@ EOT
     rm -rf "$D/dav1d-$DAV1D_VER"
     touch "$D/dav1d/.version-$DAV1D_VER"
 fi
-echo "dependencies ready in third_party/deps (lunasvg $LUNASVG_COMMIT, dav1d $DAV1D_VER)"
+
+# PDFium
+if [ ! -f "$D/pdfium/.version-$PDFIUM_VER" ]; then
+    echo "pdfium $PDFIUM_VER"
+    rm -rf "$D/pdfium"
+    curl -fsSL -o "$D/pdfium.tgz" "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/$PDFIUM_VER/pdfium-win-x64.tgz"
+    echo "$PDFIUM_SHA256 *$D/pdfium.tgz" | sha256sum -c --quiet
+    mkdir -p "$D/pdfium"
+    tar xf "$D/pdfium.tgz" -C "$D/pdfium" && rm "$D/pdfium.tgz"
+    touch "$D/pdfium/.version-$PDFIUM_VER"
+fi
+echo "dependencies ready in third_party/deps (lunasvg $LUNASVG_COMMIT, dav1d $DAV1D_VER, pdfium $PDFIUM_VER)"

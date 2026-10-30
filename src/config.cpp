@@ -1,5 +1,6 @@
 // FarNitroView for Far Manager: settings and the configuration dialog.
 #include "farglobals.h"
+#include "image.h"
 
 #include "DlgBuilder.hpp"
 #include "PluginSettings.hpp"
@@ -31,6 +32,10 @@ void Config::Load() {
     ppChroma = s.Get(0, L"Chroma", ppChroma);
     chroma = s.Get(0, L"ChromaPercent", (int)(chroma * 100)) / 100.0;
     titleTemplate = s.Get(0, L"TitleTemplate", titleTemplate.c_str());
+    pdf = s.Get(0, L"Pdf", pdf);
+    pdfEnter = s.Get(0, L"PdfEnter", pdfEnter);
+    pdfFitWidth = s.Get(0, L"PdfFitWidth", pdfFitWidth);
+    SetPdfEnabled(pdf);
 }
 
 void Config::Save() const {
@@ -53,6 +58,9 @@ void Config::Save() const {
     s.Set(0, L"Chroma", ppChroma);
     s.Set(0, L"ChromaPercent", (int)std::lround(chroma * 100));
     s.Set(0, L"TitleTemplate", titleTemplate.c_str());
+    s.Set(0, L"Pdf", pdf);
+    s.Set(0, L"PdfEnter", pdfEnter);
+    s.Set(0, L"PdfFitWidth", pdfFitWidth);
 }
 
 static bool ParseColor(const wchar_t *s, uint32_t *c) {
@@ -65,8 +73,8 @@ static bool ParseColor(const wchar_t *s, uint32_t *c) {
 }
 
 bool Config::Dialog() {
-    bool b[13] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize,
-                  enlarge,      keepPosition, loop, ppAutolevels, ppAutoluma, ppChroma};
+    bool b[16] = {enterArchive, quickView, view,  fullscreen, smooth,       showInfo, autosize, enlarge,
+                  keepPosition, loop,      ppAutolevels, ppAutoluma, ppChroma, pdf,     pdfEnter, pdfFitWidth};
     wchar_t bgN[16], bgS[16], pfx[32], chr[16];
     swprintf(bgN, 16, L"%06X", bgNormal);
     swprintf(bgS, 16, L"%06X", bgSelected);
@@ -88,6 +96,10 @@ bool Config::Dialog() {
     d.AddText(MAutosize);
     d.AddCheckbox(MAutosizeOpen, &b[6]);
     d.AddCheckbox(MEnlarge, &b[7]);
+    d.AddText(MPdf);
+    d.AddCheckbox(MPdfOpen, &b[13]);
+    d.AddCheckbox(MPdfEnter, &b[14]);
+    d.AddCheckbox(MPdfFitWidth, &b[15]);
     d.ColumnBreak();
     d.AddText(MJumps);
     d.AddCheckbox(MKeepPosition, &b[8]);
@@ -121,6 +133,10 @@ bool Config::Dialog() {
     ppAutolevels = b[10];
     ppAutoluma = b[11];
     ppChroma = b[12];
+    pdf = b[13];
+    pdfEnter = b[14];
+    pdfFitWidth = b[15];
+    SetPdfEnabled(pdf);
     double c = _wtof(chr);
     if (c > 0 && c <= 10) chroma = c;
     ParseColor(bgN, &bgNormal);

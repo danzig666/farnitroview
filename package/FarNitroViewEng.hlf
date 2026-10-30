@@ -9,6 +9,12 @@ DNG, lossy WebP, TIFF, AVIF, SVG and the full-size JPEG inside Canon CR2, Nikon 
 Fujifilm RAF files. Everything else (GIF, BMP, ICO, JPEG XR, lossless WebP, AVIF/JPEG XL
 with the Store extensions ...) goes through Windows Imaging Component.
 
+ PDF files are shown too, through PDFium (pdfium.dll next to the plugin), on #F3#, in the quick
+view and from the plugins menu; #Enter# keeps opening them with their own program unless the
+option says otherwise. Pages are rendered in the background at the scale they are shown: a slow
+one comes in as it is being drawn, and all the keys keep working meanwhile. Password protected
+files are not opened; the post-processing (#F6#, #F7#, #F8#) does not apply to PDF pages.
+
  It is started by
    - #Enter# or #Ctrl-PgDn# on an image (option "Enter archive");
    - #F3# on an image, also inside archives and from Find file (option "View");
@@ -31,9 +37,14 @@ $ #FarNitroView: keys and mouse#
  #Space#/#BS#, #PgDn#/#PgUp#, #N#/#B#, #2#/#1#, mouse wheel
     Next / previous image. With #Shift# the selection of the current file is inverted first;
     with #Ctrl# the zoom and the position are kept.
+    A PDF of several pages: these keys go to its next / previous page (the zoom and the rotation
+    stay, the page is shown from its top), and stop at its first and last page. The mouse wheel
+    scrolls the page and goes on to the next page at its edge, also stopping at the first and
+    last page. In a PDF of one page the wheel goes on to the next file.
 
  #Alt# with the keys above / #Alt-Shift#
     Next / previous page of a multi-page file / 20 pages at a time.
+    In a PDF #Alt# goes to the next / previous file instead.
 
  #P#
     Paging goes through the pages too, as if each page were a file.
@@ -51,7 +62,7 @@ $ #FarNitroView: keys and mouse#
     Full screen on / off.
 
  #*#, #9#
-    Zoom 100%.
+    Zoom 100%. A PDF page is fitted into the window instead.
 
  #/#, #0#, #Tab#, double click on the image
     Toggle: fit to the screen / 100%.
@@ -109,7 +120,12 @@ $ #FarNitroView: settings#
                          (off by default: the window title shows the same; I toggles it).
 
  #Autosize on image open# Large images are fitted to the screen; otherwise 100%.
- #Enlarge small images#   Fitting enlarges small images too.
+ #Enlarge small images#   Fitting enlarges small images too (PDF pages always).
+
+ #Open PDF files#         Show PDF files on F3 and in the quick view (needs pdfium.dll).
+ #Enter opens PDFs here too#  Enter and Ctrl-PgDn too, instead of their own program.
+ #Fit to width on open#   PDF pages open as wide as the window, from the top; otherwise as
+                         "Autosize on image open" says. 100% is the page at 96 dpi.
 
  #Keep position on jumps# The zoom and the position stay when going to another image.
  #Loop jumping#           After the last image the first, before the first the last.

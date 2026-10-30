@@ -35,13 +35,17 @@ well as in Windows Terminal.
 - **Animations and pages**: animated GIFs play; multi-page TIFFs (and other multi-frame files)
   page with Alt-PgDn / Alt-PgUp, or with P as if every page were a file.
 - **Vector images**: SVG is rendered at the scale it is shown, so it stays sharp at any zoom.
+- **PDF**: F3 and the quick view show PDF files through PDFium, sharp at any zoom. Move the cursor in
+  the panel with Ctrl-Q on and see each first page; PgDn (or the wheel) goes through the pages,
+  Alt-PgDn through the folder's PDFs. Heavy pages render in the background and never block the keys.
 - **Post-processing** as in PictureView: F8 auto-levels, F7 auto-brightness, F6 more colour.
 - **Your own title**: a title template decides what the window title shows.
 - **Quick view**: pictures appear in Far's quick view panel as you move the cursor, and get out of
   the way of dialogs and menus.
 - **Everywhere**: drawn in a window laid over the console — conhost, Windows Terminal (found
   precisely through UI Automation), ConEmu and others; per-monitor DPI aware; full screen with F.
-- **Self-contained**: one statically linked DLL, nothing to install besides it.
+- **Self-contained**: one statically linked DLL, and `pdfium.dll` beside it for PDF (delete it and
+  everything else still works); nothing to install.
 
 <p align="center"><img src="docs/quickview.png" alt="Quick view panel showing a picture" width="820"></p>
 
@@ -59,6 +63,7 @@ well as in Windows Terminal.
 | TIFF — none, PackBits, LZW, Deflate, CCITT G3/G4 (further pages through WIC) | **nitrotiff** |
 | AVIF — 8–12 bit, 4:2:0–4:4:4, alpha, grids | **nitroavif** with dav1d — no Store extension needed |
 | SVG (without filters) | **lunasvg**, rendered at the shown scale |
+| PDF (without a password, up to 4 GB) | **PDFium**, rendered at the shown scale, in the background |
 | GIF (animated too), BMP, ICO, JPEG XR, DDS, CMYK JPEG, interlaced PNG | Windows Imaging Component |
 | lossless / transparent WebP, JPEG XL | Windows Imaging Component, with Microsoft's *WebP / JPEG XL Image Extensions* (Windows 10/11 usually has the WebP one) |
 
@@ -88,11 +93,13 @@ The key map follows PictureView's last build (2018.12.11).
 | <kbd>Space</kbd>/<kbd>BS</kbd>, <kbd>PgDn</kbd>/<kbd>PgUp</kbd>, <kbd>N</kbd>/<kbd>B</kbd>, <kbd>2</kbd>/<kbd>1</kbd>, wheel | next / previous image — with <kbd>Shift</kbd> inverts the selection first, with <kbd>Ctrl</kbd> keeps zoom and position |
 | the same with <kbd>Alt</kbd> / <kbd>Alt-Shift</kbd> | next / previous page of a multi-page file / 20 pages at a time |
 | <kbd>P</kbd> | paging goes through the pages too, as if each were a file |
+| the same in a PDF of several pages | plain: next / previous page, stopping at the first and last; <kbd>Alt</kbd>: next / previous file (one page: plain and <kbd>Alt</kbd> both go to the next file) |
+| wheel over a PDF | scrolls the page, at its edge on to the next page, stopping at the first and last (one page: on to the next file) |
 | <kbd>Pause</kbd> | pause / resume an animation |
 | <kbd>Home</kbd>/<kbd>End</kbd>, <kbd>R</kbd>/<kbd>T</kbd> | first / last image |
 | <kbd>~</kbd> | back to the previous image (and forth again) |
 | <kbd>F</kbd>, <kbd>Num 5</kbd>, <kbd>Alt-Enter</kbd>, middle click | full screen on / off |
-| <kbd>*</kbd>, <kbd>9</kbd> | 100% |
+| <kbd>*</kbd>, <kbd>9</kbd> | 100% (a PDF page: fitted into the window) |
 | <kbd>/</kbd>, <kbd>0</kbd>, <kbd>Tab</kbd>, double click on the image | fit ↔ 100% |
 | the same with <kbd>Ctrl</kbd> / <kbd>Shift</kbd> / <kbd>Alt</kbd> | fit to screen / to width / to height |
 | double click on the background | fit to width or height, whichever fills the screen |
@@ -115,6 +122,8 @@ The key map follows PictureView's last build (2018.12.11).
 - which actions open pictures: **Enter archive** (Enter, Ctrl-PgDn), **Quick view**, **View** (F3)
 - **full screen on startup**, **smooth scaling**, **information line**
 - **autosize on open** (fit large images), **enlarge small images**
+- **PDF**: **open PDF files** (F3, Ctrl-Q), **Enter opens PDFs here too** (off: Enter starts their own
+  program), **fit to width on open** (100% is the page at 96 dpi)
 - **keep position on jumps**, **loop jumping**
 - **background colours** (hex `RRGGBB`) for normal and for selected files
 - **post-processing** on at the start (auto-levels, auto-luma, chroma) and the **chroma multiplier** (default 1.5)
@@ -126,7 +135,8 @@ The key map follows PictureView's last build (2018.12.11).
 ## Differences from PictureView
 
 Not there: PVD decoder plugins and CorelDRAW drawings. Animated WebP / AVIF sequences show their
-first frame. Quick view is placed exactly in conhost and Windows Terminal; in other terminals the
+first frame. PDF files with a password do not open, and post-processing does not apply to PDF pages.
+Quick view is placed exactly in conhost and Windows Terminal; in other terminals the
 position is estimated from the window size.
 
 ## Building from source
@@ -140,7 +150,7 @@ cd farnitroview
 # llvm-mingw, unpacked into ext/ (or set LLVM_MINGW=..., or have it on PATH)
 curl -LO https://github.com/mstorsjo/llvm-mingw/releases/download/20261020/llvm-mingw-20261020-ucrt-x86_64.zip
 mkdir -p ext && unzip -q llvm-mingw-20261020-ucrt-x86_64.zip -d ext
-./deps.sh                        # optional: lunasvg (SVG) and dav1d (AVIF); needs Python
+./deps.sh                        # optional: lunasvg (SVG), dav1d (AVIF), PDFium (PDF); needs Python
 ./build.sh                       # -> dist/FarNitroView/
 ARCH=x86-64-v2 ./build.sh        # for CPUs without AVX2
 ```
@@ -161,6 +171,7 @@ and publishes the zips.
 | [`src/overlay.cpp`](src/overlay.cpp) | the never-activated topmost window over the console, on its own thread; finds the text area in Windows Terminal via UI Automation |
 | [`src/render.cpp`](src/render.cpp) | zoom and orientation: an area-averaged reduction cache, bilinear / pixel-exact enlarging, all multi-threaded |
 | [`src/decode.cpp`](src/decode.cpp) | jpeg-nitro → BGRA, SVG, WIC as the fallback (pages, GIF animation composited frame by frame), transparency over the background |
+| [`src/pdf.cpp`](src/pdf.cpp) | PDFium, loaded on first use: documents kept open while in use, pages rendered in slices on a thread of their own, the latest request only |
 | [`src/postproc.cpp`](src/postproc.cpp) | auto-levels, auto-luma, chroma |
 | [`src/config.cpp`](src/config.cpp) | settings and the dialog |
 
@@ -168,6 +179,7 @@ and publishes the zips.
 
 - [jpeg-nitro](https://github.com/gereoffy/jpeg-nitro) by A'rpi — the decoders (MIT), included as a submodule.
 - [lunasvg](https://github.com/sammycage/lunasvg) and plutovg by Samuel Ugochukwu (MIT), [dav1d](https://code.videolan.org/videolan/dav1d) by VideoLAN (BSD-2-Clause) — built in by `deps.sh`.
+- [PDFium](https://pdfium.googlesource.com/pdfium/) (Apache-2.0 / BSD-3), the prebuilt `pdfium.dll` of [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) by Benoit Blanchon — licenses in the zip.
 - [Far Manager](https://github.com/FarGroup/FarManager) plugin SDK headers (`third_party/farsdk`, BSD-3 with plugin exception).
 - PictureView by Pavel Skakov — the plugin this one is modelled on.
 

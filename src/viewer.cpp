@@ -177,7 +177,7 @@ void QuickViewShow(const std::wstring &path, intptr_t viewerId, int left, int to
         s.enlarge = Cfg.enlarge;
         s.bg = Cfg.bgNormal;
         s.info.clear();
-        s.message = GetMsg(MLoading);
+        s.message = s.busyText = GetMsg(MLoading);
         s.visible = !QV->suspended;
     });
     {
@@ -347,9 +347,11 @@ private:
     HWND host_;
     bool fullscreen_;
     ImagePtr img_, raw_;        // shown (post-processed), as decoded
+    int rawItem_ = -1;          // which of items_ raw_ is
     std::wstring err_;
     int page_ = 0;              // of a multi-page file
     bool pagesAsImages_ = false;// P: paging goes through the pages too
+    enum { LandNone, LandTop, LandBottom } pageLand_ = LandNone;   // a PDF's next page: where to show it from
     int frame_ = 0;             // of an animation
     ULONGLONG nextFrame_ = 0;
     bool paused_ = false;
@@ -369,11 +371,14 @@ private:
     double dragCx_ = 0, dragCy_ = 0;
 
     void Go(int index, bool keep);
-    void GoPage(int page, bool keep);
+    void GoPage(int page, bool keep, bool fromBottom = false);
+    bool PdfWheel(int dir);
+    bool PdfPaged();
+    void Zoom100(double ax, double ay);
     void Animate();
     DWORD AnimationWait();
     void SetPostProcess(int flags);
-    void Step(int delta, bool keep);
+    void Step(int delta, bool keep, bool wholeFile = false);
     void CheckLoaded();
     void Refresh();
     void Prefetch();
@@ -510,6 +515,7 @@ void Viewer::Refresh() {
     s.view.smooth = Cfg.smooth;
     s.view.frame = frame_;
     s.bg = items_[cur_].sel ? Cfg.bgSelected : Cfg.bgNormal;
+    s.busyText = GetMsg(MLoading);
     if (showInfo_) s.info = title;
     if (!loaded_ && !img_) s.message = GetMsg(MLoading);
     else if (loaded_ && !img_) s.message = items_[cur_].name + L"\n" + GetMsg(MCannotDecode) + L"\n" + err_;
@@ -547,21 +553,56 @@ void Viewer::Go(int index, bool keep) {
     if (!loaded_) Refresh();   // (the previous image stays until this one is there; the title says which)
 }
 
-void Viewer::GoPage(int page, bool keep) {
+void Viewer::GoPage(int page, bool keep, bool fromBottom) {
     if (!raw_ || raw_->pages <= 1) return;
     page = std::clamp(page, 0, raw_->pages - 1);
     if (page == page_) return;
     page_ = page;
     loaded_ = false;
     keepNext_ = keep;
+    if (raw_->pdf) {   // reading on: the zoom and the rotation stay, the next page from its top
+        keepNext_ = true;
+        pageLand_ = fromBottom ? LandBottom : LandTop;
+    }
     Prefetch();
     CheckLoaded();
     if (!loaded_) Refresh();
 }
 
-void Viewer::Step(int delta, bool keep) {
+// The wheel over a PDF: scrolls the page and at its edge goes on to the next (dir 1) or previous
+// (-1) page. False: there is nothing more of this file that way.
+bool Viewer::PdfWheel(int dir) {
+    if (!img_ || !img_->pdf) return false;
+    SIZE v = View();
+    int ow, oh;
+    OrientedDims(&ow, &oh);
+    const double hh = v.cy / (2 * scale_);
+    const bool atEdge = oh <= 2 * hh || (dir > 0 ? cy_ >= oh - hh - 1e-6 : cy_ <= hh + 1e-6);
+    if (!atEdge) {
+        Pan(0, dir * std::max(48.0, v.cy / 6.0));
+        return true;
+    }
+    if (img_->pages <= 1) return false;
+    if (page_ + dir >= 0 && page_ + dir < img_->pages) GoPage(page_ + dir, true, dir < 0);
+    return true;
+}
+
+// the file shown has several PDF pages: paging goes through them, not to another file
+bool Viewer::PdfPaged() { return raw_ && raw_->pdf && raw_->pages > 1 && rawItem_ == cur_; }
+
+// * and 9: a PDF's 100% (96 dpi) is of no use, it is fitted into the window instead
+void Viewer::Zoom100(double ax, double ay) {
+    if (!img_) return;
+    if (img_->pdf) {
+        ApplyFit(Fit::Both);
+        Refresh();
+    } else
+        ZoomTo(1, ax, ay);
+}
+
+void Viewer::Step(int delta, bool keep, bool wholeFile) {
     // P: the pages of a multi-page file first, as if they were files of their own
-    if (pagesAsImages_ && loaded_ && raw_ && raw_->pages > 1 && page_ + delta >= 0 && page_ + delta < raw_->pages) {
+    if (!wholeFile && pagesAsImages_ && loaded_ && raw_ && raw_->pages > 1 && page_ + delta >= 0 && page_ + delta < raw_->pages) {
         GoPage(page_ + delta, keep);
         return;
     }
@@ -602,8 +643,11 @@ void Viewer::CheckLoaded() {
     if (!loader_.Get(LoadKey(items_[cur_].path, page_), &img, &err)) return;
     loaded_ = true;
     const bool keep = (keepNext_ || Cfg.keepPosition) && img_ && img;
+    const auto land = pageLand_;
     keepNext_ = false;
+    pageLand_ = LandNone;
     raw_ = img;
+    rawItem_ = cur_;
     img_ = pp_ && img ? PostProcess(img, pp_, Cfg.chroma) : img;
     err_ = err;
     frame_ = 0;
@@ -612,10 +656,19 @@ void Viewer::CheckLoaded() {
         Refresh();
         return;
     }
-    orient_ = Orient::FromExif(img_->orientation);
+    const bool nextPage = land != LandNone && img_->pdf;
+    if (!nextPage) orient_ = Orient::FromExif(img_->orientation);
     if (keep) {
         if (fit_ != Fit::None) ApplyFit(fit_);
         else Clamp();
+        if (nextPage) {
+            int ow, oh;
+            OrientedDims(&ow, &oh);
+            cy_ = land == LandTop ? 0 : oh;
+            Clamp();
+        }
+    } else if (img_->pdf && Cfg.pdfFitWidth) {
+        ApplyFit(Fit::Width);
     } else if (Cfg.autosize) {
         ApplyFit(Fit::Both);
     } else {
@@ -640,7 +693,7 @@ double Viewer::FitScale(Fit f) {
     case Fit::Height: return sh;
     default: {
         double s = std::min(sw, sh);
-        return Cfg.enlarge ? s : std::min(s, 1.0);
+        return Cfg.enlarge || (img_ && img_->pdf) ? s : std::min(s, 1.0);
     }
     }
 }
@@ -770,6 +823,15 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
     // moving to another image: Shift inverts the selection of the current one first (panel only),
     // Ctrl keeps the zoom and the position
     auto jump = [&](int delta) {
+        // a PDF: Alt goes to another file, and a file of several pages is paged without it
+        if (alt && !ctrl && !shift && (IsPdf(it.path.c_str(), nullptr, 0) || (raw_ && raw_->pdf && rawItem_ == cur_))) {
+            Step(delta, false, true);
+            return;
+        }
+        if (!alt && !ctrl && !shift && PdfPaged()) {
+            GoPage(page_ + delta, false);
+            return;
+        }
         if (alt && !ctrl) {   // pages of a multi-page file; Alt-Shift: 20 at a time
             GoPage(page_ + delta * (shift ? 20 : 1), false);
             return;
@@ -790,7 +852,7 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
     const bool altGr = ctrl && alt && ch >= 32;
     if ((!ctrl && !alt) || altGr) {
         switch (ch) {
-        case L'*': ZoomTo(1, mx, my); return;
+        case L'*': Zoom100(mx, my); return;
         case L'/': ToggleFit100(mx, my); return;
         case L'+': case L'=': ZoomStep(1, false, false, mx, my); return;
         case L'-': case L'_': ZoomStep(-1, false, false, mx, my); return;
@@ -866,7 +928,7 @@ void Viewer::HandleKey(const KEY_EVENT_RECORD &k) {
 
     case VK_MULTIPLY: case '9':
         if (ctrl || shift || alt) fitKey();
-        else ZoomTo(1, mx, my);
+        else Zoom100(mx, my);
         return;
     case VK_DIVIDE: case VK_OEM_2: case '0': case VK_TAB:
         if (ctrl || shift || alt) fitKey();
@@ -948,6 +1010,7 @@ void Viewer::HandleMouse(const OverlayEvent &e) {
             wheelZoom_ = true;
             ZoomStep(dir, false, false, e.x, e.y);
         } else {
+            if (!(e.keys & MK_SHIFT) && PdfWheel(-dir)) return;
             if ((e.keys & MK_SHIFT) && panel_) items_[cur_].sel = !items_[cur_].sel;
             Step(-dir, false);
             Refresh();

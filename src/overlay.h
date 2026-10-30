@@ -22,6 +22,7 @@ struct OverlayState {
     uint32_t bg = 0;
     std::wstring info;         // the information line (empty: none)
     std::wstring message;      // centred text (loading, error)
+    std::wstring busyText;     // shown like message over a PDF page with nothing to show yet
     bool visible = false;
 };
 
