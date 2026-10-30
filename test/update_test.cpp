@@ -31,6 +31,16 @@ static std::string Get(const std::wstring &path) {
     return s;
 }
 static bool Exists(const std::wstring &p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
+static bool Elevated() {
+    HANDLE t = nullptr;
+    TOKEN_ELEVATION te = {};
+    DWORD n = 0;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &t)) {
+        GetTokenInformation(t, TokenElevation, &te, sizeof te, &n);
+        CloseHandle(t);
+    }
+    return te.TokenIsElevated != 0;
+}
 
 static void TestVersions() {
     Check(UpdateIsNewer(L"1.4.0", 1, 3, 0), "1.4.0 is newer than 1.3.0");
@@ -102,14 +112,18 @@ static void TestApply(const std::wstring &work) {
     Check(Get(dir + L"FarNitroViewEng.lng") == "old lng", "... that file is unchanged");
     Check(Get(dir + L"FarNitroView.dll").size() > 1000, "... and the plugin is the old one again");
 
-    // no right to write there (a folder denying it: this also holds when running as administrator)
-    e.clear();
-    const std::wstring denied = work + L"plugin\\denied\\";
-    CreateDirectoryW(denied.c_str(), nullptr);
-    _wsystem((L"icacls \"" + denied + L".\" /deny *S-1-1-0:(WD,AD) >nul").c_str());
-    Check(!UpdateApply(ok, sha, denied, &e, &na) && na, "a folder we may not write to is reported as such");
-    _wsystem((L"icacls \"" + denied + L".\" /remove:d *S-1-1-0 >nul").c_str());
-    RemoveDirectoryW(denied.c_str());
+    // no right to write there (only without administrator rights, which a CI runner has: they get past the denial)
+    if (Elevated()) {
+        printf("  (a folder we may not write to: not tested, running elevated)\n");
+    } else {
+        e.clear();
+        const std::wstring denied = work + L"plugin\\denied\\";
+        CreateDirectoryW(denied.c_str(), nullptr);
+        _wsystem((L"icacls \"" + denied + L".\" /deny *S-1-1-0:(WD,AD) >nul").c_str());
+        Check(!UpdateApply(ok, sha, denied, &e, &na) && na, "a folder we may not write to is reported as such");
+        _wsystem((L"icacls \"" + denied + L".\" /remove:d *S-1-1-0 >nul").c_str());
+        RemoveDirectoryW(denied.c_str());
+    }
 
     // the update itself, with the old DLL still loaded
     e.clear();
